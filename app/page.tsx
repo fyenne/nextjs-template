@@ -17,10 +17,10 @@ export default function Home() {
 
       <main className="flex flex-col items-center justify-start min-h-screen px-4 sm:px-24">
         {/* Hero Section */}
-        <section className="w-full max-w-5xl py-12 text-center">
+        <section className="w-full max-w-5xl py-4 text-center">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white">Siming Yan</h1>
-          <p className="mt-3 text-xl text-gray-600 dark:text-gray-300">Data Scientist | Commodities Trading</p>
-          <p className="mt-4 text-base text-gray-500 dark:text-gray-400">
+          <p className="mt-2 text-xl text-gray-600 dark:text-gray-300">Data Scientist | Commodities Trading</p>
+          <p className="mt-2 text-base text-gray-500 dark:text-gray-400">
             Experienced data scientist with over 5 years in building data pipelines, dashboards, and Machine Learning / Deep Learning models. Passionate about leveraging data for trading insights.
           </p>
           <div className="mt-2 flex justify-center space-x-4">
@@ -31,7 +31,7 @@ export default function Home() {
         </section>
 
         {/* Education Section */}
-        <section id="education" className="w-full max-w-5xl py-2">
+        <section id="education" className="w-full max-w-5xl py-0">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Education</h2>
           <div className="space-y-4">
             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -56,15 +56,15 @@ export default function Home() {
               <p className="text-sm text-gray-600 dark:text-gray-300">Bunge</p>
               <p className="text-xs text-gray-500 dark:text-gray-400">September 2022 - Present</p>
               <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
-                <li>Web crawling and data warehouse development from sources including 4 Chinese futures exchanges, Yahoo Finance commodity prices, and data supplier APIs. Utilized MySQL, PostgreSQL, and SQL Server.</li>
-                <li>Created data dashboards with Django backend and Next.js frontend.</li>
+                <li>Web crawling and data warehouse development from sources including Chinese stocks / futures exchanges, yfinance commodity prices, news websites and data supplier APIs. Utilized <a className="text-yellow-800 bg-stone-100">MySQL, PostgreSQL, and SQL Server.</a></li>
                 <li>Data modeling projects:
                   <ul className="ml-6 list-disc list-inside space-y-1">
-                    <li>AIS vessel destination prediction using GRU and LSTM; self-defined regional levels on 67 targets, achieving MAP@3 score of 0.97.</li>
-                    <li>Daily freight price modeling via tree-based models (XGBoost, LightGBM, CatBoost) and LSTM ensemble for next-day price direction; accuracy 0.67+.</li>
-                    <li>Trading opportunity triggers for Soybean Meal - Corn - Rapeseed Meal futures using tree models; binary classification with recall 0.72 and precision (as achieved).</li>
+                    <li>AIS vessel destination prediction: using <a className="text-yellow-800 bg-stone-100">GRU and LSTM</a>, self-defined regional levels on 67 targets, achieving MAP@3 score of <a className="text-red-800 bg-stone-100">0.97</a>.</li>
+                    <li>Daily freight price modeling: via <a className="text-yellow-800 bg-stone-100">tree-based models (XGBoost, LightGBM, CatBoost) and LSTM </a> ensemble for next-day price direction binary classification; accuracy <a className="text-red-800 bg-stone-100">0.64±0.05</a>.</li>
+                    <li>Trading opportunity triggers for Soybean Meal - Corn - Rapeseed Meal futures: using tree-based models; binary classification, label trading signal with recall <a className="text-red-800 bg-stone-100">0.74±0.03</a>.</li>
                   </ul>
                 </li>
+                <li>Created web-apps & dashboards with Django backend and Next.js frontend.</li>
               </ul>
             </div>
             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -72,7 +72,9 @@ export default function Home() {
               <p className="text-sm text-gray-600 dark:text-gray-300">SF Supply Chain</p>
               <p className="text-xs text-gray-500 dark:text-gray-400">June 2021 - September 2022</p>
               <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
-                <li>Built data warehouse pipelines using PySpark and Hadoop.</li>
+                <li>Built data warehouse pipelines with PySpark and Hadoop. PB level data transactions in distributed data Middle Platform.</li>
+                <li>Preposition warehouse transaction amount prediction with LSTM. MAPE <a className="text-red-800 bg-stone-100">0.12±0.03</a>. </li>
+                <li>Data Applications such as dashboards and notification center.</li>
               </ul>
             </div>
           </div>
@@ -88,12 +90,12 @@ export default function Home() {
                 <li>
                   <a href="https://www.kaggle.com/competitions/map-charting-student-math-misunderstandings" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                     MAP - Charting Student Math Misunderstandings
-                  </a>: Solo Silver Medal, 64th out of 1857 teams.
+                  </a>: LLM lora fintune, Solo Silver Medal, 64th out of 1857 teams.
                 </li>
                 <li>
                   <a href="https://www.kaggle.com/competitions/cmi-detect-behavior-with-sensor-data" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                     CMI - Detect Behavior with Sensor Data
-                  </a>: Solo Bronze Medal, 234th out of 2657 teams.
+                  </a>: Bidirectional LSTM-GRU, Solo Bronze Medal, 234th out of 2657 teams.
                 </li>
               </ul>
             </div>

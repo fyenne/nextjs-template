@@ -65,6 +65,7 @@ export default function Home() {
                   </ul>
                 </li>
                 <li>Created web-apps & dashboards with Django backend and Next.js frontend.</li>
+                <li>SHFE trading API build up via <a className="text-yellow-800 bg-stone-100">C++.</a></li>
               </ul>
             </div>
             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -90,12 +91,12 @@ export default function Home() {
                 <li>
                   <a href="https://www.kaggle.com/competitions/map-charting-student-math-misunderstandings" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                     MAP - Charting Student Math Misunderstandings
-                  </a>: LLM lora fintune, Solo Silver Medal, 64th out of 1857 teams.
+                  </a>: LLM lora fintune, Solo Silver Medal, <a className="text-red-700 bg-stone-100">64th</a> out of 1857 teams.
                 </li>
                 <li>
                   <a href="https://www.kaggle.com/competitions/cmi-detect-behavior-with-sensor-data" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                     CMI - Detect Behavior with Sensor Data
-                  </a>: Bidirectional LSTM-GRU, Solo Bronze Medal, 234th out of 2657 teams.
+                  </a>: Bidirectional LSTM-GRU, Solo Bronze Medal, <a className="text-red-700 bg-stone-100">234th</a> out of 2657 teams.
                 </li>
               </ul>
             </div>

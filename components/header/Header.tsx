@@ -14,16 +14,16 @@ const HoverMotionComponent = () => {
     textarea.style.position = 'fixed'; // Avoid scrolling to bottom
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
-    
+
     try {
       // Select and copy the text
       textarea.select();
       document.execCommand('copy');
       document.body.removeChild(textarea);
-      
+
       // Show success state
       setIsCopied(true);
-      
+
       // Reset copied state after 2 seconds
       setTimeout(() => {
         setIsCopied(false);
@@ -39,37 +39,20 @@ const HoverMotionComponent = () => {
   };
 
   return (
-    <div className="relative inline-block">
-      <motion.div
-        className="cursor-pointer flex items-center gap-2"
-        whileHover={{ scale: 1.5 }}
-        whileTap={{ scale: 1.1 }}
-        drag="x"
-        dragConstraints={{ left: -100, right: 100 }}
+    <div className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-500 text-sm">
+      < motion.div
+        whileHover={{ scale: 1.05 }
+        }
+        whileTap={{ scale: 1.0 }}
         onHoverStart={() => setIsHovered(true)}
         onHoverEnd={() => setIsHovered(false)}
         onClick={handleCopy}
       >
-        <p className="text-lg font-medium">Contact me</p>
-        {isCopied ? (
-          <CheckCircle className="w-4 h-4 text-green-500" />
-        ) : (
-          <Copy className="w-4 h-4" />
-        )}
-      </motion.div>
-      
-      {/* Tooltip */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isHovered ? 1 : 0 }}
-        transition={{ duration: 0.2 }}
-        className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 bg-black text-white px-4 py-2 rounded-md text-sm whitespace-nowrap"
-      >
-        {isCopied ? 'Copied!' : 'Click to copy'}
-        {/* Triangle pointer */}
-        <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-black rotate-45" />
-      </motion.div>
-    </div>
+        <p className="text-sm font-medium">Copy my Email</p>
+        
+      </motion.div >
+
+    </div >
   );
 };
 

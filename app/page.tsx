@@ -1,83 +1,110 @@
 "use client";
-import Image from "next/image";
+
 import React from "react";
 import Header from "../components/header/Header";
-import Head from "next/head";
 import { useContext, useEffect, useState, useRef } from "react";
 
 export default function Home() {
   const homeRef = useRef<HTMLDivElement>(null);
   const meta = {
     title: "Samo yan",
-    description: `I've been working on Software development for 5 years straight. Get in touch with me to know more.`,
+    description: `I've been working on datascience for 5 years. Get in touch with me to know more.`,
     image: "/titofCercle.png",
     type: "website",
   };
   return (
     <>
-      <Head>
-        <title>{meta.title}</title>
-        <meta name="robots" content="follow, index" />
-        <meta content={meta.description} name="description" />
-        <meta property="og:url" content={`https://anaflous.com`} />
-        <link rel="canonical" href={`https://anaflous.com`} />
-        <meta property="og:type" content={meta.type} />
-        <meta property="og:site_name" content="Manu Arora" />
-        <meta property="og:description" content={meta.description} />
-        <meta property="og:title" content={meta.title} />
-        <meta property="og:image" content={meta.image} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:site" content="@titofabdo" />
-        <meta name="twitter:title" content={meta.title} />
-        <meta name="twitter:description" content={meta.description} />
-        <meta name="twitter:image" content={meta.image} />
-      </Head>
 
-      <main className="flex flex-col items-center justify-between min-h-screen p-x-24">
-        <div className="z-10 items-center justify-between w-full max-w-5xl font-mono text-sm lg:flex">
-          <p className="fixed top-2 left-0 flex justify-center w-full pt-8 pb-6 border-b border-gray-300 bg-gradient-to-b from-zinc-200 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-            Siming Yan&nbsp;
-            <code className="font-mono font-bold">@vybge</code>
+      <main className="flex flex-col items-center justify-start min-h-screen px-4 sm:px-24">
+        {/* Hero Section */}
+        <section className="w-full max-w-5xl py-12 text-center">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white">Siming Yan</h1>
+          <p className="mt-3 text-xl text-gray-600 dark:text-gray-300">Data Scientist | Commodities Trading</p>
+          <p className="mt-4 text-base text-gray-500 dark:text-gray-400">
+            Experienced data scientist with over 5 years in building data pipelines, dashboards, and Machine Learning / Deep Learning models. Passionate about leveraging data for trading insights.
           </p>
-          <div className="fixed bottom-0 left-0 flex items-end justify-center w-full h-48 bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none"></div>
-          <Header />
-        </div>
+          <div className="mt-2 flex justify-center space-x-4">
+            <a href="https://github.com/fyenne" target="_blank" rel="noopener noreferrer" className="px-3 py-1 bg-gray-800 text-white rounded hover:bg-gray-700 text-sm">GitHub</a>
+            <a href="https://www.kaggle.com/fyenneyenn" target="_blank" rel="noopener noreferrer" className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 text-sm">Kaggle</a>
+            <Header />
+          </div>
+        </section>
 
-        <div className="grid mb-32 text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-2 lg:text-left">
-          <a
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            className="px-5 py-4 transition-colors border border-transparent rounded-lg group hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className="mb-3 text-2xl font-semibold">
-              Docs{" "}
-              <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-                -&gt;
-              </span>
-            </h2>
-            <p className="m-0 max-w-[30ch] text-sm opacity-50">
-              Find in-depth information about Next.js features and API.
-            </p>
-          </a>
+        {/* Education Section */}
+        <section id="education" className="w-full max-w-5xl py-2">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Education</h2>
+          <div className="space-y-4">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+              <h3 className="text-lg font-semibold">University of Wisconsin-Madison</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300">Major in Agriculture and Applied Economics</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">2019 - 2021</p>
+            </div>
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+              <h3 className="text-lg font-semibold">Donghua University</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300">Major in Environment and Energy Engineering, Minor in English Literature</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">2014 - 2018 (Distinguished Undergraduate Thesis)</p>
+            </div>
+          </div>
+        </section>
 
-          <a
-            href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            className="px-5 py-4 transition-colors border border-transparent rounded-lg group hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className="mb-3 text-2xl font-semibold">
-              Learn{" "}
-              <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-                -&gt;
-              </span>
-            </h2>
-            <p className="m-0 max-w-[30ch] text-sm opacity-50">
-              Learn about Next.js in an interactive course with&nbsp;quizzes!
-            </p>
-          </a>
-        </div>
+        {/* Experience Section */}
+        <section id="experience" className="w-full max-w-5xl py-4">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Professional Experience</h2>
+          <div className="space-y-6">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+              <h3 className="text-lg font-semibold">Data Scientist, Freight Trading</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300">Bunge</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">September 2022 - Present</p>
+              <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                <li>Web crawling and data warehouse development from sources including 4 Chinese futures exchanges, Yahoo Finance commodity prices, and data supplier APIs. Utilized MySQL, PostgreSQL, and SQL Server.</li>
+                <li>Created data dashboards with Django backend and Next.js frontend.</li>
+                <li>Data modeling projects:
+                  <ul className="ml-6 list-disc list-inside space-y-1">
+                    <li>AIS vessel destination prediction using GRU and LSTM; self-defined regional levels on 67 targets, achieving MAP@3 score of 0.97.</li>
+                    <li>Daily freight price modeling via tree-based models (XGBoost, LightGBM, CatBoost) and LSTM ensemble for next-day price direction; accuracy 0.67+.</li>
+                    <li>Trading opportunity triggers for Soybean Meal - Corn - Rapeseed Meal futures using tree models; binary classification with recall 0.72 and precision (as achieved).</li>
+                  </ul>
+                </li>
+              </ul>
+            </div>
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+              <h3 className="text-lg font-semibold">Big Data Engineer and Analyst</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300">SF Supply Chain</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">June 2021 - September 2022</p>
+              <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                <li>Built data warehouse pipelines using PySpark and Hadoop.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* Achievements Section */}
+        <section id="achievements" className="w-full max-w-5xl py-8">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Achievements & Competitions</h2>
+          <div className="space-y-4">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+              <h3 className="text-lg font-semibold">Kaggle Competitions</h3>
+              <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                <li>
+                  <a href="https://www.kaggle.com/competitions/map-charting-student-math-misunderstandings" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                    MAP - Charting Student Math Misunderstandings
+                  </a>: Solo Silver Medal, 64th out of 1857 teams.
+                </li>
+                <li>
+                  <a href="https://www.kaggle.com/competitions/cmi-detect-behavior-with-sensor-data" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                    CMI - Detect Behavior with Sensor Data
+                  </a>: Solo Bronze Medal, 234th out of 2657 teams.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* Footer or Contact */}
+        <footer className="w-full max-w-5xl py-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+          <p>&copy; 2025 Siming Yan. All rights reserved.</p>
+        </footer>
+
       </main>
     </>
   );

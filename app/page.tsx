@@ -86,42 +86,54 @@ export default function Home() {
               <p className="text-xs text-gray-500 dark:text-gray-400">Sep 2022 – Present</p>
 
               <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
+
                 <li>
-                  Web crawling and data warehouse development from sources including Chinese stocks/futures exchanges,
-                  yfinance commodity prices, news websites and supplier APIs. Utilized 
-                  <a className="text-yellow-800 bg-stone-100"> MySQL, PostgreSQL, SQL Server.</a>
+                  Led development of a centralized freight & logistics data warehouse integrating
+                  global futures/options data, macroeconomic datasets, weather forecasts,
+                  AIS vessel tracking data, and commodity supply–demand datasets.
                 </li>
 
                 <li>
-                  Data modeling projects:
-                  <ul className="ml-6 list-disc list-inside space-y-1">
-                    <li>
-                      AIS vessel destination prediction using 
-                      <a className="text-yellow-800 bg-stone-100"> GRU and LSTM </a>, custom region hierarchy (67 targets),
-                      achieving MAP@3 <a className="text-red-800 bg-stone-100">0.97</a>.
-                    </li>
-
-                    <li>
-                      Daily freight price modeling via 
-                      <a className="text-yellow-800 bg-stone-100"> tree models (XGBoost, LightGBM, CatBoost) + LSTM </a>
-                      ensemble; next-day price direction accuracy 
-                      <a className="text-red-800 bg-stone-100">0.64±0.05</a>.
-                    </li>
-
-                    <li>
-                      Trading opportunity triggers for Soybean Meal – Corn – Rapeseed Meal using tree models;
-                      trading signal recall 
-                      <a className="text-red-800 bg-stone-100">0.74±0.03</a>.
-                    </li>
-                  </ul>
+                  Designed and implemented a multi-layer warehouse architecture
+                  <a className="text-yellow-800 bg-stone-100"> ODS → DWD → ADS </a>
+                  supporting data governance, scalable analytics, and machine learning pipelines,
+                  built on
+                  <a className="text-yellow-800 bg-stone-100"> SQL Server, MySQL, PostgreSQL</a>.
                 </li>
-
-                <li>Created web-apps & dashboards with Django backend and Next.js frontend.</li>
 
                 <li>
-                  SHFE trading API build-up via
-                  <a className="text-yellow-800 bg-stone-100"> C++</a>.
+                  Developed quantitative freight price trading models using ensemble tree methods
+                  <a className="text-yellow-800 bg-stone-100"> (XGBoost, LightGBM, CatBoost)</a>
+                  combined with neural architectures; production strategy achieved mean Sharpe Ratio
+                  <a className="text-red-800 bg-stone-100"> 3.4 </a>
+                  over the past two years and serves as a key supplementary trading signal.
                 </li>
+
+                <li>
+                  Built AIS vessel destination prediction models using
+                  <a className="text-yellow-800 bg-stone-100"> Attention, GRU, LSTM </a>
+                  with customized maritime region hierarchy (67 targets), achieving MAP@3
+                  <a className="text-red-800 bg-stone-100"> 0.95 </a>.
+                </li>
+
+                <li>
+                  Conducted cross-market statistical analysis between Chinese ETF assets
+                  and global equity markets using correlation analysis and linear regression
+                  to identify macro-driven asset dynamics.
+                </li>
+
+                <li>
+                  Developed scalable analytics platforms with
+                  <a className="text-yellow-800 bg-stone-100"> Django, GraphQL </a>
+                  backend services and interactive dashboards using
+                  <a className="text-yellow-800 bg-stone-100"> Next.js, TailwindCSS, HighCharts</a>.
+                </li>
+
+                <li>
+                  Implemented trading connectivity for the SHFE market via
+                  <a className="text-yellow-800 bg-stone-100"> C++ trading API</a>.
+                </li>
+
               </ul>
             </div>
 
@@ -132,17 +144,24 @@ export default function Home() {
               <p className="text-xs text-gray-500 dark:text-gray-400">Jun 2021 – Sep 2022</p>
 
               <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-300">
+
                 <li>
-                  Built data warehouse pipelines with PySpark and Hadoop.
-                  PB-level data transactions in distributed data middle platform.
+                  Designed distributed data warehouse pipelines using
+                  <a className="text-yellow-800 bg-stone-100"> PySpark and Hadoop</a>,
+                  supporting PB-scale transactional data processing across the internal data platform.
                 </li>
+
                 <li>
-                  LSTM forecasting for preposition warehouse transaction amount;
-                  MAPE <a className="text-red-800 bg-stone-100">0.12±0.03</a>.
+                  Developed LSTM forecasting models for pre-position warehouse transaction volumes,
+                  achieving MAPE
+                  <a className="text-red-800 bg-stone-100"> 0.12 ± 0.03 </a>.
                 </li>
+
                 <li>
-                  Developed dashboards and notification center systems.
+                  Built internal analytics dashboards and automated notification systems
+                  for operational monitoring and reporting.
                 </li>
+
               </ul>
             </div>
 

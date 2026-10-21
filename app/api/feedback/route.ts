@@ -4,21 +4,7 @@ import {
   recordFeedback,
   FeedbackSubmission,
 } from "@/lib/feedback-db";
-
-function getClientIp(req: NextRequest): string {
-  const forwardedFor = req.headers.get("x-forwarded-for");
-  if (forwardedFor) {
-    const firstIp = forwardedFor.split(",")[0].trim();
-    if (firstIp) return firstIp;
-  }
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) return realIp.trim();
-  const cfConnectingIp = req.headers.get("cf-connecting-ip");
-  if (cfConnectingIp) return cfConnectingIp.trim();
-  // Direct connections expose no client IP to Route Handlers. A shared fallback such as
-  // "127.0.0.1" would block every direct visitor after the first submission, so skip the IP check.
-  return "";
-}
+import { getClientIp } from "@/lib/client-ip";
 
 export async function GET(req: NextRequest) {
   try {
@@ -57,95 +43,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Validate mandatory (*) fields
-    const {
-      politenessRating,
-      conversationRating,
-      conversationDynamic,
-      appearanceRating,
-      overallRating,
-      futureIntention,
-    } = body;
+    // 2. Validate mandatory (*) fields, following the questionnaire order.
+    // Tag rows (1.4 / 2.3 / 3.3 / 4.4), 4.3 and the free-text boxes are optional.
+    const ratingFields: { key: string; message: string }[] = [
+      { key: "appearanceRating", message: "请为【1.1 外形与第一印象】打分（必填）" },
+      { key: "conversationRating", message: "请为【2.1 整体聊天氛围与互动舒适度】打分（必填）" },
+      { key: "politenessRating", message: "请为【3.1 整体礼貌与举止分寸】打分（必填）" },
+      { key: "overallRating", message: "请为【4.1 本次约会的综合体验】打分（必填）" },
+    ];
 
-    if (
-      typeof politenessRating !== "number" ||
-      politenessRating < 1 ||
-      politenessRating > 5
-    ) {
-      return NextResponse.json(
-        { error: "请为【整体礼貌度与举止】打分（必填）" },
-        { status: 400 }
-      );
+    for (const { key, message } of ratingFields) {
+      const value = body[key];
+      if (typeof value !== "number" || value < 1 || value > 5) {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
     }
 
-    if (
-      typeof conversationRating !== "number" ||
-      conversationRating < 1 ||
-      conversationRating > 5
-    ) {
-      return NextResponse.json(
-        { error: "请为【谈吐与交流氛围】打分（必填）" },
-        { status: 400 }
-      );
-    }
+    const singleChoiceFields: { key: string; message: string }[] = [
+      { key: "clothingStyle", message: "请选择【1.2 穿搭风格与整洁度】（必填）" },
+      { key: "photoMatch", message: "请选择【1.3 与社交软件/照片的符合度】（必填）" },
+      { key: "conversationDynamic", message: "请选择【2.2 聊天时的互动感受】（必填）" },
+      { key: "vibeManner", message: "请选择【3.2 相处时的气场与分寸感】（必填）" },
+      { key: "dateArrangement", message: "请选择【4.2 约会地点与环境满意度】（必填）" },
+    ];
 
-    if (!conversationDynamic || typeof conversationDynamic !== "string") {
-      return NextResponse.json(
-        { error: "请选择【聊天时的互动感受】（必填）" },
-        { status: 400 }
-      );
-    }
-
-    if (
-      typeof appearanceRating !== "number" ||
-      appearanceRating < 1 ||
-      appearanceRating > 5
-    ) {
-      return NextResponse.json(
-        { error: "请为【外形与第一印象】打分（必填）" },
-        { status: 400 }
-      );
-    }
-
-    if (
-      typeof overallRating !== "number" ||
-      overallRating < 1 ||
-      overallRating > 5
-    ) {
-      return NextResponse.json(
-        { error: "请为【本次约会整体体验】打分（必填）" },
-        { status: 400 }
-      );
-    }
-
-    if (!futureIntention || typeof futureIntention !== "string") {
-      return NextResponse.json(
-        { error: "请选择【后续发展意愿】（必填）" },
-        { status: 400 }
-      );
+    for (const { key, message } of singleChoiceFields) {
+      const value = body[key];
+      if (!value || typeof value !== "string") {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
     }
 
     // 3. Assemble submission
+    const {
+      appearanceRating,
+      conversationRating,
+      conversationDynamic,
+      politenessRating,
+      overallRating,
+    } = body;
+
     const newEntry: FeedbackSubmission = {
       id: `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       submittedAt: new Date().toISOString(),
       ip,
       clientToken,
       userAgent: req.headers.get("user-agent") || undefined,
-
-      politenessRating,
-      punctuality: body.punctuality || undefined,
-      etiquetteDetails: Array.isArray(body.etiquetteDetails)
-        ? body.etiquetteDetails
-        : undefined,
-      politenessNote: body.politenessNote?.trim() || undefined,
-
-      conversationRating,
-      conversationDynamic,
-      conversationTags: Array.isArray(body.conversationTags)
-        ? body.conversationTags
-        : undefined,
-      conversationNote: body.conversationNote?.trim() || undefined,
 
       appearanceRating,
       clothingStyle: body.clothingStyle || undefined,
@@ -155,12 +98,28 @@ export async function POST(req: NextRequest) {
         : undefined,
       appearanceNote: body.appearanceNote?.trim() || undefined,
 
+      conversationRating,
+      conversationDynamic,
+      conversationTags: Array.isArray(body.conversationTags)
+        ? body.conversationTags
+        : undefined,
+      conversationNote: body.conversationNote?.trim() || undefined,
+
+      politenessRating,
+      vibeManner: body.vibeManner || undefined,
+      etiquetteDetails: Array.isArray(body.etiquetteDetails)
+        ? body.etiquetteDetails
+        : undefined,
+      politenessNote: body.politenessNote?.trim() || undefined,
+
       overallRating,
       dateArrangement: body.dateArrangement || undefined,
-      futureIntention,
+      futureIntention: body.futureIntention || undefined,
+      dateImpressionTags: Array.isArray(body.dateImpressionTags)
+        ? body.dateImpressionTags
+        : undefined,
       suggestion: body.suggestion?.trim() || undefined,
 
-      platform: body.platform?.trim() || undefined,
       nickname: body.nickname?.trim() || undefined,
     };
 

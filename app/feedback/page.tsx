@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import LotteryWheel from "@/components/LotteryWheel";
 import {
   Star,
   Heart,
@@ -9,8 +10,6 @@ import {
   AlertCircle,
   ArrowLeft,
   Sparkles,
-  MessageCircle,
-  UserCheck,
   Send,
   Loader2,
 } from "lucide-react";
@@ -124,11 +123,13 @@ function RadioGroup({
 // Multi-select tags component
 function MultiTagGroup({
   label,
+  required = false,
   options,
   values,
   onChange,
 }: {
   label: string;
+  required?: boolean;
   options: string[];
   values: string[];
   onChange: (newVals: string[]) => void;
@@ -144,9 +145,9 @@ function MultiTagGroup({
   return (
     <div className="space-y-2">
       <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-        {label}{" "}
+        {label} {required && <span className="text-red-500 font-bold">*</span>}{" "}
         <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
-          (可选多个标签)
+          {required ? "(必选，至少 1 个，可多选)" : "(可选多个标签)"}
         </span>
       </label>
       <div className="flex flex-wrap gap-2">
@@ -177,31 +178,36 @@ export default function DatingFeedbackPage() {
   const [checkingStatus, setCheckingStatus] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitSuccess, setSubmitSuccess] = useState<boolean>(false);
+  const [showLottery, setShowLottery] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
 
-  // Form State
-  const [politenessRating, setPolitenessRating] = useState<number>(0);
-  const [punctuality, setPunctuality] = useState<string>("");
-  const [etiquetteDetails, setEtiquetteDetails] = useState<string[]>([]);
-  const [politenessNote, setPolitenessNote] = useState<string>("");
-
-  const [conversationRating, setConversationRating] = useState<number>(0);
-  const [conversationDynamic, setConversationDynamic] = useState<string>("");
-  const [conversationTags, setConversationTags] = useState<string[]>([]);
-  const [conversationNote, setConversationNote] = useState<string>("");
-
+  // Form State — Section 1: Appearance & Style
   const [appearanceRating, setAppearanceRating] = useState<number>(0);
   const [clothingStyle, setClothingStyle] = useState<string>("");
   const [photoMatch, setPhotoMatch] = useState<string>("");
   const [appearanceTags, setAppearanceTags] = useState<string[]>([]);
   const [appearanceNote, setAppearanceNote] = useState<string>("");
 
+  // Form State — Section 2: Conversation & Connection
+  const [conversationRating, setConversationRating] = useState<number>(0);
+  const [conversationDynamic, setConversationDynamic] = useState<string>("");
+  const [conversationTags, setConversationTags] = useState<string[]>([]);
+  const [conversationNote, setConversationNote] = useState<string>("");
+
+  // Form State — Section 3: Politeness & Manners
+  const [politenessRating, setPolitenessRating] = useState<number>(0);
+  const [vibeManner, setVibeManner] = useState<string>("");
+  const [etiquetteDetails, setEtiquetteDetails] = useState<string[]>([]);
+  const [politenessNote, setPolitenessNote] = useState<string>("");
+
+  // Form State — Section 4: Overall Experience & Next Steps
   const [overallRating, setOverallRating] = useState<number>(0);
   const [dateArrangement, setDateArrangement] = useState<string>("");
   const [futureIntention, setFutureIntention] = useState<string>("");
+  const [dateImpressionTags, setDateImpressionTags] = useState<string[]>([]);
   const [suggestion, setSuggestion] = useState<string>("");
 
-  const [platform, setPlatform] = useState<string>("");
+  // Form State — Section 6: Optional Info
   const [nickname, setNickname] = useState<string>("");
 
   // Check if visitor has already submitted
@@ -224,34 +230,36 @@ export default function DatingFeedbackPage() {
     checkStatus();
   }, []);
 
+  const showError = (message: string) => {
+    setErrorMessage(message);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Selections marked with * are mandatory; tag rows (1.4 / 2.3 / 3.3 / 4.4), 4.3 and all free-text boxes are optional.
+  const findMissingSelection = (): string => {
+    if (appearanceRating === 0) return "请先为【1.1 外形与第一印象】打分（必填）";
+    if (!clothingStyle) return "请选择【1.2 穿搭风格与整洁度】（必填）";
+    if (!photoMatch) return "请选择【1.3 与社交软件/照片的符合度】（必填）";
+
+    if (conversationRating === 0) return "请先为【2.1 整体聊天氛围与互动舒适度】打分（必填）";
+    if (!conversationDynamic) return "请选择【2.2 聊天时的互动感受】（必填）";
+
+    if (politenessRating === 0) return "请先为【3.1 整体礼貌与举止分寸】打分（必填）";
+    if (!vibeManner) return "请选择【3.2 相处时的气场与分寸感】（必填）";
+
+    if (overallRating === 0) return "请先为【4.1 本次约会的综合体验】打分（必填）";
+    if (!dateArrangement) return "请选择【4.2 约会地点与环境满意度】（必填）";
+
+    return "";
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
 
-    // Client-side validation of mandatory (*) fields
-    if (politenessRating === 0) {
-      setErrorMessage("请先为【一、整体礼貌度与举止】打分（必填）");
-      window.scrollTo({ top: 200, behavior: "smooth" });
-      return;
-    }
-    if (conversationRating === 0) {
-      setErrorMessage("请先为【二、谈吐交流氛围】打分（必填）");
-      return;
-    }
-    if (!conversationDynamic) {
-      setErrorMessage("请选择【二、聊天时的互动感受】（必填）");
-      return;
-    }
-    if (appearanceRating === 0) {
-      setErrorMessage("请先为【三、外形与第一印象】打分（必填）");
-      return;
-    }
-    if (overallRating === 0) {
-      setErrorMessage("请先为【四、本次约会整体体验】打分（必填）");
-      return;
-    }
-    if (!futureIntention) {
-      setErrorMessage("请选择【四、后续发展意愿】（必填）");
+    const missing = findMissingSelection();
+    if (missing) {
+      showError(missing);
       return;
     }
 
@@ -265,15 +273,6 @@ export default function DatingFeedbackPage() {
 
       const payload = {
         clientToken,
-        politenessRating,
-        punctuality,
-        etiquetteDetails,
-        politenessNote,
-
-        conversationRating,
-        conversationDynamic,
-        conversationTags,
-        conversationNote,
 
         appearanceRating,
         clothingStyle,
@@ -281,12 +280,22 @@ export default function DatingFeedbackPage() {
         appearanceTags,
         appearanceNote,
 
+        conversationRating,
+        conversationDynamic,
+        conversationTags,
+        conversationNote,
+
+        politenessRating,
+        vibeManner,
+        etiquetteDetails,
+        politenessNote,
+
         overallRating,
         dateArrangement,
         futureIntention,
+        dateImpressionTags,
         suggestion,
 
-        platform,
         nickname,
       };
 
@@ -327,8 +336,42 @@ export default function DatingFeedbackPage() {
     );
   }
 
-  // State 2: Already submitted view
-  if (hasSubmittedBefore && !submitSuccess) {
+  // State 2: Reward lottery — shown right after a successful submission, or reopened from the
+  // "already submitted" screen. One draw per IP / browser, enforced by /api/lottery.
+  if (submitSuccess || showLottery) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-start px-4 sm:px-6 py-8 md:py-12">
+        <div className="w-full max-w-3xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="w-7 h-7" />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white">
+              反馈提交成功！
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+              非常感谢您的每一句坦诚分享！无论是鼓励还是中肯的建议，都对我十分宝贵。
+              祝愿你每天心情明朗，一切顺心如意！🌸
+            </p>
+          </div>
+
+          <LotteryWheel />
+
+          <div className="text-center pb-10">
+            <Link
+              href="/error"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" /> 返回主页
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // State 3: Already submitted view
+  if (hasSubmittedBefore) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
         <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-100 dark:border-gray-700 p-8 text-center space-y-5">
@@ -342,40 +385,19 @@ export default function DatingFeedbackPage() {
             感谢您之前的真诚分享！为了保证问卷样本的客观性与独立性，每个 IP
             与设备仅限提交一次。您的评价已被安全记录。
           </p>
-          <div className="pt-2">
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowLottery(true)}
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
+            >
+              🎁 去抽奖
+            </button>
             <Link
-              href="/"
+              href="/error"
               className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" /> 返回个人主页
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  // State 3: Submission successful view
-  if (submitSuccess) {
-    return (
-      <main className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
-        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-emerald-100 dark:border-emerald-900/50 p-8 text-center space-y-5">
-          <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-            <Sparkles className="w-9 h-9" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            反馈提交成功！
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-            非常感谢您的每一句坦诚分享！无论是鼓励还是中肯的建议，都对我十分宝贵。
-            祝愿你每天心情明朗，一切顺心如意！🌸
-          </p>
-          <div className="pt-3">
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" /> 返回主页
             </Link>
           </div>
         </div>
@@ -387,14 +409,14 @@ export default function DatingFeedbackPage() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-start px-4 sm:px-6 py-8 md:py-12">
       <div className="w-full max-w-3xl">
-        {/* Top return link */}
-        <div className="mb-6">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" /> 返回个人主页
-          </Link>
+        {/* Page title */}
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white leading-snug">
+            你觉得跟samo上一次的约会怎么样？
+          </h1>
+          <p className="mt-2 text-sm font-medium text-rose-500 dark:text-rose-400">
+            感谢反馈 🌸
+          </p>
         </div>
 
         {/* Header card */}
@@ -405,9 +427,9 @@ export default function DatingFeedbackPage() {
               Anonymous Feedback
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white">
             约会体验匿名反馈问卷
-          </h1>
+          </h2>
           <p className="mt-3 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
             感谢与你度过的美好时光！为了真诚复盘自己在约会中的细节与表现，并持续成长为更成熟体贴的人，特设此匿名反馈表。
           </p>
@@ -435,61 +457,75 @@ export default function DatingFeedbackPage() {
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* SECTION 1: Politeness & Manners */}
+          {/* SECTION 1: Appearance & Style */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
             <div className="border-b border-gray-100 dark:border-gray-700 pb-3 flex items-center gap-2">
-              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold text-sm">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold text-sm">
                 1
               </span>
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                整体礼貌度与举止风度
+                外形衣品与仪态气质
               </h2>
             </div>
 
             <StarRating
-              label="1.1 整体礼貌与举止分寸评分"
+              label="1.1 外形与第一印象评分"
               required={true}
-              value={politenessRating}
-              onChange={setPolitenessRating}
+              value={appearanceRating}
+              onChange={setAppearanceRating}
             />
 
             <RadioGroup
-              label="1.2 约会守时情况"
-              value={punctuality}
-              onChange={setPunctuality}
+              label="1.2 穿搭风格与整洁度"
+              required={true}
+              value={clothingStyle}
+              onChange={setClothingStyle}
               options={[
-                { label: "提前到达", value: "提前到达", desc: "提前到达地点并做好了安排" },
-                { label: "非常准时", value: "非常准时", desc: "在约定时间前后准时出现" },
-                { label: "轻微迟到但有说明", value: "轻微迟到但有说明", desc: "略微迟到，但提前沟通并致歉" },
-                { label: "迟到且说明不充分", value: "迟到且说明不充分", desc: "影响了约会体验" },
+                { label: "很有品味且得体", value: "很有品味且得体", desc: "搭配协调，质感很好，赏心悦目" },
+                { label: "干净清爽大方", value: "干净清爽大方", desc: "整洁舒适，给人自然舒服的阳光感" },
+                { label: "偏日常随意", value: "偏日常随意", desc: "比较休闲，无功无过" },
+                { label: "有明显提升空间", value: "有明显提升空间", desc: "建议在穿搭或发型上多加打磨" },
+              ]}
+            />
+
+            <RadioGroup
+              label="1.3 与社交软件/照片的符合度"
+              required={true}
+              value={photoMatch}
+              onChange={setPhotoMatch}
+              options={[
+                { label: "比照片更有气质/更帅", value: "比照片更有气质/更帅", desc: "真人动态气质更佳" },
+                { label: "与照片高度一致", value: "与照片高度一致", desc: "真实坦荡，见光不死" },
+                { label: "略有差异但很合理", value: "略有差异但很合理", desc: "符合正常预期" },
+                { label: "与照片差异较大", value: "与照片差异较大", desc: "反差略明显" },
               ]}
             />
 
             <MultiTagGroup
-              label="1.3 举止与细节礼仪观察"
+              label="1.4 形象与仪态印象（优点 / 待改进）"
               options={[
-                "主动推门 / 拉椅",
-                "照顾就餐口味偏好",
-                "对服务员友善客气",
-                "买单主动且得体",
-                "懂得保持舒适社交距离",
-                "体贴照顾返程交通/送行",
-                "手机放在一旁很少看",
-                "说话温和有耐心",
+                "笑容温暖有感染力",
+                "体态挺拔自然",
+                "气味清爽好闻",
+                "整体干净利落",
+                "表情偏严肃、笑容较少",
+                "发型或胡须略显随意",
+                "体态略含胸、可再挺拔些",
+                "穿搭色系偏单调或偏随意",
               ]}
-              values={etiquetteDetails}
-              onChange={setEtiquetteDetails}
+              values={appearanceTags}
+              onChange={setAppearanceTags}
             />
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-                1.4 礼貌或举止方面的补充建议 (选填)
+                1.5 形象方面的真实建议 (选填)
               </label>
               <textarea
                 rows={2}
-                value={politenessNote}
-                onChange={(e) => setPolitenessNote(e.target.value)}
-                placeholder="例如：某些细节感觉很暖心，或者哪些小习惯若能调整会更好..."
+                value={appearanceNote}
+                onChange={(e) => setAppearanceNote(e.target.value)}
+                placeholder="例如：适合什么样的色系/风格，或者发型有哪些改进小建议..."
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>
@@ -548,16 +584,15 @@ export default function DatingFeedbackPage() {
             />
 
             <MultiTagGroup
-              label="2.3 话题特色与闪光点"
+              label="2.3 话题特色与闪光点（优点 / 待改进）"
               options={[
                 "幽默风趣有梗",
-                "三观与思考契合",
-                "见闻广博视野开阔",
                 "善于共情体恤人",
-                "踏实诚恳不吹嘘",
-                "话题稍偏学术/工作",
-                "生活情趣丰富",
-                "对很多事物保持好奇心",
+                "见闻广博视野开阔",
+                "总把话题绕回自己",
+                "说教感 / 爱讲道理",
+                "否定或轻视我的观点与经历",
+                "话题偏学术或工作、略显干",
               ]}
               values={conversationTags}
               onChange={setConversationTags}
@@ -577,72 +612,78 @@ export default function DatingFeedbackPage() {
             </div>
           </div>
 
-          {/* SECTION 3: Appearance & Style */}
+          {/* SECTION 3: Politeness & Manners */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
             <div className="border-b border-gray-100 dark:border-gray-700 pb-3 flex items-center gap-2">
-              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold text-sm">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold text-sm">
                 3
               </span>
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                外形衣品与仪态气质
+                整体礼貌度与举止风度
               </h2>
             </div>
 
             <StarRating
-              label="3.1 外形与第一印象评分"
+              label="3.1 整体礼貌与举止分寸评分"
               required={true}
-              value={appearanceRating}
-              onChange={setAppearanceRating}
+              value={politenessRating}
+              onChange={setPolitenessRating}
             />
 
             <RadioGroup
-              label="3.2 穿搭风格与整洁度"
-              value={clothingStyle}
-              onChange={setClothingStyle}
+              label="3.2 相处时的气场与分寸感"
+              required={true}
+              value={vibeManner}
+              onChange={setVibeManner}
               options={[
-                { label: "很有品味且得体", value: "很有品味且得体", desc: "搭配协调，质感很好，赏心悦目" },
-                { label: "干净清爽大方", value: "干净清爽大方", desc: "整洁舒适，给人自然舒服的阳光感" },
-                { label: "偏日常随意", value: "偏日常随意", desc: "比较休闲，无功无过" },
-                { label: "有明显提升空间", value: "有明显提升空间", desc: "建议在穿搭或发型上多加打磨" },
-              ]}
-            />
-
-            <RadioGroup
-              label="3.3 与社交软件/照片的符合度"
-              value={photoMatch}
-              onChange={setPhotoMatch}
-              options={[
-                { label: "比照片更有气质/更帅", value: "比照片更有气质/更帅", desc: "真人动态气质更佳" },
-                { label: "与照片高度一致", value: "与照片高度一致", desc: "真实坦荡，见光不死" },
-                { label: "略有差异但很合理", value: "略有差异但很合理", desc: "符合正常预期" },
-                { label: "与照片差异较大", value: "与照片差异较大", desc: "反差略明显" },
+                {
+                  label: "平等尊重，氛围轻松",
+                  value: "平等尊重，氛围轻松",
+                  desc: "双方都能自然表达，没有居高临下的感觉",
+                },
+                {
+                  label: "偶有说教感，但不至于压迫",
+                  value: "偶有说教感，但不至于压迫",
+                  desc: "有时会讲道理、给建议，语气还算温和",
+                },
+                {
+                  label: "大男子主义倾向明显",
+                  value: "大男子主义倾向明显",
+                  desc: "会替我做决定，或默认我应该听你的安排",
+                },
+                {
+                  label: "否定或贬低我的表现",
+                  value: "否定或贬低我的表现",
+                  desc: "对我的工作、能力或分享的东西，评价偏否定",
+                },
               ]}
             />
 
             <MultiTagGroup
-              label="3.4 形象亮点与仪态印象"
+              label="3.3 举止与细节礼仪观察（优点 / 待改进）"
               options={[
-                "笑容温暖有感染力",
-                "眼神真诚清澈",
-                "体态挺拔自然",
-                "气味清爽好闻",
-                "发型整洁干净",
-                "表情管理自然",
-                "建议尝试更多穿搭风格",
+                "主动推门 / 拉椅",
+                "对服务员友善客气",
+                "照顾就餐口味偏好",
+                "买单主动且得体",
+                "聊天时看手机较多",
+                "对服务员态度略显敷衍",
+                "偶尔打断我说话 / 抢话",
+                "买单时略显计较或不太自然",
               ]}
-              values={appearanceTags}
-              onChange={setAppearanceTags}
+              values={etiquetteDetails}
+              onChange={setEtiquetteDetails}
             />
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-                3.5 形象方面的真实建议 (选填)
+                3.4 礼貌或举止方面的补充建议 (选填)
               </label>
               <textarea
                 rows={2}
-                value={appearanceNote}
-                onChange={(e) => setAppearanceNote(e.target.value)}
-                placeholder="例如：适合什么样的色系/风格，或者发型有哪些改进小建议..."
+                value={politenessNote}
+                onChange={(e) => setPolitenessNote(e.target.value)}
+                placeholder="例如：某些细节感觉很暖心，或者哪些小习惯若能调整会更好..."
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>
@@ -668,6 +709,7 @@ export default function DatingFeedbackPage() {
 
             <RadioGroup
               label="4.2 约会地点与环境满意度"
+              required={true}
               value={dateArrangement}
               onChange={setDateArrangement}
               options={[
@@ -680,7 +722,6 @@ export default function DatingFeedbackPage() {
 
             <RadioGroup
               label="4.3 后续发展意愿"
-              required={true}
               value={futureIntention}
               onChange={setFutureIntention}
               options={[
@@ -707,12 +748,42 @@ export default function DatingFeedbackPage() {
               ]}
             />
 
+            <MultiTagGroup
+              label="4.4 约会安排与相处细节（优点 / 待改进）"
+              options={[
+                "选址用心、环境有氛围",
+                "行程安排周到、节奏舒服",
+                "做决定前会先问我的想法",
+                "行程略显仓促 / 赶时间",
+                "地点偏嘈杂、不太适合聊天",
+                "很多事直接替我决定",
+                "整体更多按自己的节奏走",
+              ]}
+              values={dateImpressionTags}
+              onChange={setDateImpressionTags}
+            />
+          </div>
+
+          {/* SECTION 5: Teach me how to be a better me */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
+            <div className="border-b border-gray-100 dark:border-gray-700 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-bold text-sm">
+                  5
+                </span>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                  教我如何成为更好的自己
+                </h2>
+              </div>
+              <span className="text-xs text-gray-400">选填</span>
+            </div>
+
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-                4.4 如果你愿意，约会中有什么细节是我下次可以做得更好的？（选填）
+              <label className="text-sm font-bold text-gray-800 dark:text-gray-200 block">
+                5.1 教我如何成为更好的自己（选填）
               </label>
               <textarea
-                rows={3}
+                rows={4}
                 value={suggestion}
                 onChange={(e) => setSuggestion(e.target.value)}
                 placeholder="例如：多留些倾听的时间、提前确认安排，或选个更方便聊天的地点。也可以留空。谢谢你愿意坦诚分享。"
@@ -721,15 +792,15 @@ export default function DatingFeedbackPage() {
             </div>
           </div>
 
-          {/* SECTION 5: Platform & Optional Info */}
+          {/* SECTION 6: Optional Info */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
             <div className="border-b border-gray-100 dark:border-gray-700 pb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="flex items-center justify-center w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-sm">
-                  5
+                  6
                 </span>
                 <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                  相识渠道与称呼 (选填 / Optional)
+                  你的称呼 (选填 / Optional)
                 </h2>
               </div>
               <span className="text-xs text-gray-400">全部选填</span>
@@ -737,29 +808,7 @@ export default function DatingFeedbackPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-                5.1 我们相识的平台 / 途径 (选填)
-              </label>
-              <select
-                value={platform}
-                onChange={(e) => setPlatform(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              >
-                <option value="">请选择相识途径 (可不选)</option>
-                <option value="朋友介绍 / 微信引荐">朋友介绍 / 微信引荐</option>
-                <option value="小红书 (RED)">小红书 (RED)</option>
-                <option value="青藤之恋">青藤之恋</option>
-                <option value="Tinder">Tinder</option>
-                <option value="Bumble">Bumble</option>
-                <option value="二狗 / 伴读等小程序">二狗 / 伴读等小程序</option>
-                <option value="线下活动 / 户外 / 聚会">线下活动 / 户外 / 聚会</option>
-                <option value="偶然相识 / 社交媒体">偶然相识 / 社交媒体</option>
-                <option value="其他途径">其他途径</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-gray-800 dark:text-gray-200 block">
-                5.2 你的称呼 / 微信备注 (选填，留空则完全匿名)
+                6.1 你的称呼 / 微信备注 (选填，留空则完全匿名)
               </label>
               <input
                 type="text"

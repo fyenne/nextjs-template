@@ -33,7 +33,7 @@ export interface LotteryRecord extends LotteryAward {
 export function createGuaranteedAward(): LotteryAward {
   const prize = LOTTERY_PRIZES[LOTTERY_PRIZES.length - 1];
   const code = `samowishyouallbest`;
-  const amount = Math.round((1 + Math.random() * 87) * 100) / 10000;
+  const amount = 6 + Math.floor(Math.random() / 10); // 6-15
 
   return {
     prizeId: prize.id,

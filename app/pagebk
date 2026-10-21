@@ -7,7 +7,7 @@ import { useContext, useEffect, useState, useRef } from "react";
 export default function Home() {
   const homeRef = useRef<HTMLDivElement>(null);
   const meta = {
-    title: "Samo yan",
+    title: "Siming yan",
     description: `I've been working on datascience for 5 years. Get in touch with me to know more.`,
     image: "/titofCercle.png",
     type: "website",

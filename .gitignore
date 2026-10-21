@@ -37,3 +37,6 @@ next-env.d.ts
 
 
 /my-website-main/
+
+# local feedback store (contains submitter IPs and device tokens)
+/data/

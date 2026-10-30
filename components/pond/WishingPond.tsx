@@ -10,6 +10,12 @@ type Mode = "pending" | "native" | "fallback";
 // Whether texElementSubImage2D output needs a vertical flip in the shader.
 const CARD_FLIP = false;
 const MAX_DPR = 1.5;
+// Medium-frequency rain: one drop every 0.12-0.40 s.
+const RAIN_MIN_GAP = 0.12;
+const RAIN_GAP_RANGE = 0.28;
+// Lightning every 4-12 s.
+const STRIKE_MIN_GAP = 4;
+const STRIKE_GAP_RANGE = 8;
 
 const now = () => performance.now() / 1000;
 
@@ -20,7 +26,8 @@ export default function WishingPond() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const engine = useRef<{ renderer: PondRenderer; scene: PondScene } | null>(null);
+  const flashRef = useRef<HTMLDivElement>(null);
+  const engine = useRef<{ renderer: PondRenderer } | null>(null);
   const lastMove = useRef({ x: -999, y: -999 });
 
   useEffect(() => {
@@ -43,11 +50,12 @@ export default function WishingPond() {
       console.error("Pond renderer unavailable", error);
       return;
     }
-    engine.current = { renderer, scene };
+    engine.current = { renderer };
 
     let disposed = false;
     let raf = 0;
     let rainAt = 0;
+    let strikeAt = now() + 4 + Math.random() * 8;
     let cardUploaded = false;
     let geometryKey = "";
 
@@ -83,9 +91,22 @@ export default function WishingPond() {
 
     const frame = () => {
       const t = now();
-      if (t > rainAt) {
-        rainAt = t + 2 + Math.random() * 3;
-        renderer.addRipple(Math.random() * renderer.cssW, Math.random() * renderer.cssH, 0.3, t);
+      for (let n = 0; n < 4 && t > rainAt; n++) {
+        rainAt = Math.max(rainAt, t - 0.3) + RAIN_MIN_GAP + Math.random() * RAIN_GAP_RANGE;
+        renderer.addRipple(
+          Math.random() * renderer.cssW,
+          Math.random() * renderer.cssH,
+          0.7 + Math.random() * 0.5,
+          t,
+          "drop",
+        );
+      }
+      if (t > strikeAt) {
+        renderer.strike(t);
+        strikeAt = t + STRIKE_MIN_GAP + Math.random() * STRIKE_GAP_RANGE;
+      }
+      if (flashRef.current) {
+        flashRef.current.style.opacity = mode === "fallback" ? String(renderer.flashLevel(t) * 0.85) : "0";
       }
       syncCard();
       renderer.render(t);
@@ -152,7 +173,6 @@ export default function WishingPond() {
     const { x, y } = pointerPos(e);
     const t = now();
     engine.current.renderer.addRipple(x, y, 1, t);
-    engine.current.scene.feed(x, y, t);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -160,7 +180,7 @@ export default function WishingPond() {
     const { x, y } = pointerPos(e);
     if (Math.hypot(x - lastMove.current.x, y - lastMove.current.y) < 28) return;
     lastMove.current = { x, y };
-    engine.current.renderer.addRipple(x, y, 0.22, now());
+    engine.current.renderer.addRipple(x, y, 0.3, now(), "drop");
   };
 
   const tossCoin = useCallback(
@@ -179,7 +199,6 @@ export default function WishingPond() {
       const t = now();
       renderer.addRipple(x, y, 1.7, t);
       renderer.addRipple(x, y, 0.9, t + 0.22);
-      eng.scene.feed(x, y, t);
     },
     [wish],
   );
@@ -198,7 +217,7 @@ export default function WishingPond() {
       <form onSubmit={tossCoin} className="flex flex-col gap-3">
         <h1 className="text-lg font-semibold italic text-teal-900">Wishing pond</h1>
         <p className="text-sm leading-snug text-slate-600">
-          Type a wish and toss a coin in. Watch the koi come, and the water carry it away.
+          Type a wish and toss a coin in. Listen to the rain carry it away.
         </p>
         <input
           value={wish}
@@ -224,7 +243,7 @@ export default function WishingPond() {
       ref={wrapperRef}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      className="fixed inset-0 overflow-hidden bg-[#071d1c]"
+      className="fixed inset-0 overflow-hidden bg-[#1d1f21]"
     >
       <canvas
         ref={canvasRef}
@@ -234,6 +253,11 @@ export default function WishingPond() {
         {native && cardEl}
       </canvas>
       {mode === "fallback" && cardEl}
+      <div
+        ref={flashRef}
+        className="pointer-events-none absolute inset-0 bg-[#dbe6ff] opacity-0"
+        aria-hidden="true"
+      />
       <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-black/40 px-3 py-1 text-xs text-white/80">
         {mode === "pending"
           ? "Loading…"

@@ -1,0 +1,67 @@
+{
+  "feedbacks": [
+    {
+      "id": "fb_1792583127336_mvf5r",
+      "submittedAt": "2026-10-21T11:45:27.336Z",
+      "ip": "127.0.0.1",
+      "clientToken": "dt_1792582533255_c02x2gs",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "appearanceRating": 5,
+      "clothingStyle": "偏日常随意",
+      "photoMatch": "比照片更有气质/更帅",
+      "appearanceTags": [
+        "体态略含胸、可再挺拔些"
+      ],
+      "appearanceNote": "zxczxc",
+      "conversationRating": 5,
+      "conversationDynamic": "双向畅聊，毫无冷场",
+      "conversationTags": [
+        "话题偏学术或工作、略显干",
+        "否定或轻视我的观点与经历",
+        "善于共情体恤人"
+      ],
+      "conversationNote": "hase12",
+      "politenessRating": 5,
+      "vibeManner": "平等尊重，氛围轻松",
+      "etiquetteDetails": [
+        "买单时略显计较或不太自然",
+        "照顾就餐口味偏好"
+      ],
+      "politenessNote": "zxcazsd",
+      "overallRating": 5,
+      "dateArrangement": "非常用心且有氛围",
+      "futureIntention": "很有心动感，期待下一次约会",
+      "dateImpressionTags": [
+        "做决定前会先问我的想法",
+        "整体更多按自己的节奏走"
+      ],
+      "suggestion": "asr12421231231123124124123123123",
+      "nickname": "samo"
+    }
+  ],
+  "submittedIps": {
+    "127.0.0.1": "2026-10-21T11:45:27.336Z"
+  },
+  "submittedTokens": {
+    "dt_1792582533255_c02x2gs": "2026-10-21T11:45:27.336Z"
+  },
+  "lotteries": [
+    {
+      "id": "lt_1792583136621_ds5l5",
+      "spunAt": "2026-10-21T11:45:36.621Z",
+      "ip": "127.0.0.1",
+      "clientToken": "dt_1792582533255_c02x2gs",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "prizeId": "redpacket",
+      "prize": "随即金额口令红包",
+      "code": "SAMO-5636",
+      "amount": 53.65
+    }
+  ],
+  "spunIps": {
+    "127.0.0.1": "lt_1792583136621_ds5l5"
+  },
+  "spunTokens": {
+    "dt_1792582533255_c02x2gs": "lt_1792583136621_ds5l5"
+  }
+}

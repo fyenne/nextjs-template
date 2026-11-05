@@ -8,6 +8,7 @@ import { LAPS_TO_UNLOCK } from "@/lib/scene/lap-tracker";
 import { createPuppy, easeTongue } from "@/lib/scene/puppy";
 import { SceneStages } from "@/lib/scene/stages";
 import { VisitorSession } from "@/lib/scene/visitor";
+import { createCampfire } from "@/lib/scene/campfire";
 import { WinterTransition } from "@/lib/scene/winter";
 import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
@@ -1230,7 +1231,19 @@ export default function Home() {
       });
 
     // The monk faces +Z in local space; rotate by his yaw for the world vector.
+    // yaw -0.18 sends local +Z to about (-0.18, 0, 0.98). The fire uses this same vector.
     const monkForward = new THREE.Vector3(Math.sin(monk.rotation.y), 0, Math.cos(monk.rotation.y)).normalize();
+    const campfire = createCampfire();
+    // In front of the monk, and a step to his right so the dog's spawn does not sit in the flames.
+    // Right is derived from monkForward: (fz, 0, -fx).
+    const fireDistance = 1.85;
+    const fireSide = 0.2;
+    const fireX = monkX + monkForward.x * fireDistance + monkForward.z * fireSide;
+    const fireZ = monkZ + monkForward.z * fireDistance - monkForward.x * fireSide;
+    campfire.group.position.set(fireX, terrainHeight(fireX, fireZ) + 0.02, fireZ);
+    campfire.group.scale.setScalar(1.5);
+    campfire.group.visible = false;
+    scene.add(campfire.group);
 
     // A few quiet stones anchor the foreground without making a forest floor busy.
     const stoneGeometry = new THREE.IcosahedronGeometry(1, 1);
@@ -1302,6 +1315,7 @@ export default function Home() {
       stages.jumpTo("winter");
       winter.start(0, true);
       beginIntro();
+      campfire.group.visible = true;
     } else if (window.location.hash.includes("autumn")) {
       stages.jumpTo("autumn");
       autumn.start(0, true);
@@ -1543,7 +1557,9 @@ export default function Home() {
       }
 
       const trunkClearance = TREE_TRUNK_RADIUS + puppy.radius;
-      if (pointerInside && !dragging) {
+      // Winter is the last stage. The dog stays where it is and no longer follows the cursor.
+      const chasing = !winter.started;
+      if (chasing && pointerInside && !dragging) {
         dogRay.setFromCamera(pointerNdc, camera);
         const hits = dogRay.intersectObject(ground);
         if (hits.length > 0) {
@@ -1563,17 +1579,20 @@ export default function Home() {
       }
 
       // The dog walks round the trunk towards the cursor and runs when far behind it.
-      dogMotion.x = dog.position.x;
-      dogMotion.z = dog.position.z;
-      const walk = stepDog(dogMotion, dogTarget.x, dogTarget.z, delta, trunkClearance, reduceMotion);
-      const dogMoving = walk.moving;
-      if (dogMoving) {
-        dog.position.x = dogMotion.x;
-        dog.position.z = dogMotion.z;
-        const yaw = Math.atan2(walk.headX, walk.headZ);
-        const turn = Math.atan2(Math.sin(yaw - dog.rotation.y), Math.cos(yaw - dog.rotation.y));
-        dog.rotation.y += turn * (reduceMotion ? 1 : Math.min(1, delta * 8));
-        if (!walk.blocked) walkPhase += walk.step * 8;
+      let dogMoving = false;
+      if (chasing) {
+        dogMotion.x = dog.position.x;
+        dogMotion.z = dog.position.z;
+        const walk = stepDog(dogMotion, dogTarget.x, dogTarget.z, delta, trunkClearance, reduceMotion);
+        dogMoving = walk.moving;
+        if (dogMoving) {
+          dog.position.x = dogMotion.x;
+          dog.position.z = dogMotion.z;
+          const yaw = Math.atan2(walk.headX, walk.headZ);
+          const turn = Math.atan2(Math.sin(yaw - dog.rotation.y), Math.cos(yaw - dog.rotation.y));
+          dog.rotation.y += turn * (reduceMotion ? 1 : Math.min(1, delta * 8));
+          if (!walk.blocked) walkPhase += walk.step * 8;
+        }
       }
       dog.position.y = terrainHeight(dog.position.x, dog.position.z);
       dogShadow.position.set(dog.position.x, dog.position.y + 0.025, dog.position.z);
@@ -1594,6 +1613,7 @@ export default function Home() {
         autumn.finish();
         winter.start(now, reduceMotion);
         beginIntro();
+        campfire.group.visible = true;
       }
       autumn.update(now);
       winter.update(now, reduceMotion);
@@ -1638,6 +1658,8 @@ export default function Home() {
         });
         motes.rotation.y = now * 0.000012;
       }
+
+      if (campfire.group.visible) campfire.update(now / 1000);
 
       renderer.render(scene, camera);
     };

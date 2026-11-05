@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { buildTreeSnowGeometry } from "./snow-cap";
 import { seeded } from "./random";
 
 /** Wall-clock length of the change to winter, matching autumn. */
@@ -7,8 +8,7 @@ export const WINTER_TRANSITION_SECONDS = 2;
 type Vec3 = [number, number, number];
 
 const SNOW_GRASS = ["#e4edf4", "#d7e2ec", "#d0dbe6", "#e8eef4", "#c9d6e2"];
-/** Bright snow on the pine. */
-const TREE_SNOW_TINTS = ["#ffffff", "#f7fbff", "#ecf3fa", "#f1f7fc"];
+/** Upward-face tint. Pine bark is not given this, so the trunk shaft stays its own colour. */
 const TREE_SNOW_RGB: readonly [number, number, number] = [0.94, 0.97, 1.0];
 /**
  * Ground snow, a step under the tree white. Near-white instance tints sit on a
@@ -107,275 +107,6 @@ function snowClumpGeometry() {
   return geometry;
 }
 
-const SNOW_UP = new THREE.Vector3(0, 1, 0);
-
-type TubeMeta = { segments: number; radial: number };
-
-type SnowRing = {
-  spine: THREE.Vector3;
-  ridge: THREE.Vector3;
-  radius: number;
-  /** 1 when the crest faces the sky, 0 when the tube is a vertical shaft. */
-  up: number;
-  /** 0 at the root of this tube, 1 at the tip. */
-  t: number;
-};
-
-function smoothSeries(values: number[], radius: number) {
-  const out = new Array<number>(values.length);
-  for (let i = 0; i < values.length; i += 1) {
-    let acc = 0;
-    let wsum = 0;
-    const span = Math.max(0, Math.min(radius, values.length - 1));
-    for (let k = -span; k <= span; k += 1) {
-      const j = Math.min(values.length - 1, Math.max(0, i + k));
-      const w = span + 1 - Math.abs(k);
-      acc += values[j] * w;
-      wsum += w;
-    }
-    out[i] = acc / wsum;
-  }
-  return out;
-}
-
-function dilateMax(values: number[], radius: number) {
-  const out = new Array<number>(values.length);
-  const span = Math.max(0, Math.min(radius, values.length - 1));
-  for (let i = 0; i < values.length; i += 1) {
-    let m = 0;
-    for (let k = -span; k <= span; k += 1) {
-      const j = Math.min(values.length - 1, Math.max(0, i + k));
-      m = Math.max(m, values[j]);
-    }
-    out[i] = m;
-  }
-  return out;
-}
-
-/**
- * A pile that gathers upward. `height` is the column of snow and `halfWidth`
- * is half of the horizontal footprint, so the pile is taller than it is wide.
- * Thick shafts stay narrow: a wide cap on vertical bark reads as a white wall.
- * Limbs get a deeper coat, and joints and tips (`t` near 0 or 1) a little more,
- * so the woody knots sit inside the blanket.
- */
-function snowPile(radius: number, t: number, up: number) {
-  const node = Math.exp(-t * 7) + Math.exp(-(1 - t) * 5);
-  // Fine wood is the leaf scar and the twig tip. Bury the whole knot.
-  // The coat stays taller than it is wide.
-  if (radius < 0.2) {
-    const halfWidth = Math.max(0.11, radius * 2.4) * (1 + 0.15 * node);
-    const height = Math.max(halfWidth * 2.6, 0.32 + 0.08 * node);
-    return { halfWidth, height, embed: Math.max(radius * 1.6, 0.07) };
-  }
-  if (radius > 0.42) {
-    const halfWidth = Math.min(0.16, Math.max(0.05, radius * 0.1));
-    const height = Math.max(halfWidth * 2.5, 0.22);
-    return { halfWidth, height, embed: Math.min(0.08, radius * 0.2) };
-  }
-  let halfWidth = Math.max(0.12, radius * 0.82) * (1 + 0.45 * node);
-  let height = Math.max(halfWidth * 2.8, radius * (2.3 + 1.1 * node), 0.34);
-  // A steep joint has no broad top. Cap the knot without painting a side stripe.
-  if (up < 0.22) {
-    halfWidth = Math.max(halfWidth, Math.min(radius * 1.2, 0.2));
-    height = Math.max(height, halfWidth * 2.4);
-  }
-  const embed = Math.max(0.04, Math.min(radius * 0.95, height * 0.42));
-  return { halfWidth, height, embed };
-}
-
-function readSnowRings(mesh: THREE.Mesh, segments: number, radial: number): SnowRing[] {
-  const position = mesh.geometry.getAttribute("position");
-  const stride = radial + 1;
-  const rings: SnowRing[] = [];
-  const v = new THREE.Vector3();
-  for (let i = 0; i <= segments; i += 1) {
-    const spine = new THREE.Vector3();
-    const ridge = new THREE.Vector3();
-    let bestUp = -Infinity;
-    for (let j = 0; j < radial; j += 1) {
-      v.fromBufferAttribute(position, i * stride + j).applyMatrix4(mesh.matrixWorld);
-      spine.add(v);
-    }
-    spine.multiplyScalar(1 / radial);
-    for (let j = 0; j < radial; j += 1) {
-      v.fromBufferAttribute(position, i * stride + j).applyMatrix4(mesh.matrixWorld);
-      const rise = v.y - spine.y;
-      if (rise > bestUp) {
-        bestUp = rise;
-        ridge.copy(v);
-      }
-    }
-    const radius = Math.max(0.001, ridge.distanceTo(spine));
-    rings.push({
-      spine,
-      ridge,
-      radius,
-      up: THREE.MathUtils.clamp(bestUp / radius, 0, 1),
-      t: segments === 0 ? 1 : i / segments,
-    });
-  }
-  return rings;
-}
-
-/** Crest the pile sits on. Thin wood and vertical shafts are covered from the centre, so a side knot cannot poke out. */
-function crestOf(ring: SnowRing) {
-  if (ring.radius < 0.2 || ring.up < 0.18) return ring.spine.clone();
-  return ring.ridge.clone();
-}
-
-function densifyRings(rings: SnowRing[]) {
-  if (rings.length < 2) return rings;
-  const out: SnowRing[] = [];
-  for (let i = 0; i < rings.length - 1; i += 1) {
-    const a = rings[i];
-    const b = rings[i + 1];
-    out.push(a);
-    out.push({
-      spine: a.spine.clone().lerp(b.spine, 0.5),
-      ridge: a.ridge.clone().lerp(b.ridge, 0.5),
-      radius: (a.radius + b.radius) * 0.5,
-      up: (a.up + b.up) * 0.5,
-      t: (a.t + b.t) * 0.5,
-    });
-  }
-  out.push(rings[rings.length - 1]);
-  return out;
-}
-
-export type SnowPile = { x: number; y: number; z: number; sx: number; sy: number; sz: number };
-
-function pushPile(out: SnowPile[], x: number, y: number, z: number, sx: number, sy: number) {
-  const horizontal = Math.max(0.04, sx);
-  const vertical = Math.max(sy, horizontal * 1.45);
-  out.push({ x, y, z, sx: horizontal, sy: vertical, sz: horizontal });
-}
-
-/** Soft mounds along a crest. Each mound is taller than it is wide, and they overlap into one blanket. */
-function appendSnowPiles(ringsIn: SnowRing[], out: SnowPile[]) {
-  const rings = densifyRings(ringsIn);
-  const n = rings.length;
-  if (n === 0) return;
-
-  const tangents: THREE.Vector3[] = [];
-  for (let i = 0; i < n; i += 1) {
-    const prev = rings[Math.max(0, i - 1)].spine;
-    const next = rings[Math.min(n - 1, i + 1)].spine;
-    const tangent = next.clone().sub(prev);
-    if (tangent.lengthSq() < 1e-8) tangent.copy(SNOW_UP);
-    else tangent.normalize();
-    tangents.push(tangent);
-  }
-
-  const last = n - 1;
-  const reach = Math.max(rings[last].radius * 2.4, 0.2);
-  const nose: SnowRing = {
-    spine: rings[last].spine.clone().addScaledVector(tangents[last], reach),
-    ridge: rings[last].ridge.clone().addScaledVector(tangents[last], reach),
-    radius: Math.max(rings[last].radius, 0.05),
-    up: rings[last].up,
-    t: 1,
-  };
-  const samples = rings.concat(nose);
-  const noseTangent = tangents[last].clone();
-
-  const sized = samples.map((ring) => snowPile(ring.radius, ring.t, ring.up));
-  const win = Math.min(11, Math.max(2, Math.floor(samples.length / 2)));
-  const height = smoothSeries(
-    dilateMax(
-      sized.map((pile) => pile.height),
-      win,
-    ),
-    Math.min(5, win),
-  );
-  const halfWidth = smoothSeries(
-    dilateMax(
-      sized.map((pile) => pile.halfWidth),
-      win,
-    ),
-    Math.min(5, win),
-  );
-  const crests = samples.map((ring) => crestOf(ring));
-  const crestX = smoothSeries(
-    crests.map((crest) => crest.x),
-    Math.min(4, win),
-  );
-  const crestZ = smoothSeries(
-    crests.map((crest) => crest.z),
-    Math.min(4, win),
-  );
-  const crestY = smoothSeries(
-    crests.map((crest) => crest.y),
-    Math.min(6, win),
-  );
-
-  for (let i = 0; i < samples.length; i += 1) {
-    const encase = samples[i].radius < 0.2;
-    const sy = height[i] * 0.55;
-    const y = encase ? crestY[i] : crestY[i] + sy * 0.22;
-    pushPile(out, crestX[i], y, crestZ[i], halfWidth[i], sy);
-  }
-
-  // Two more mounds past the wood, so the tip knot is inside the bud rather than sticking out of it.
-  const tipSy = height[samples.length - 1] * 0.55;
-  const tipSx = halfWidth[samples.length - 1];
-  for (let step = 1; step <= 2; step += 1) {
-    const dist = reach * (0.45 + step * 0.4);
-    pushPile(
-      out,
-      nose.spine.x + noseTangent.x * dist * 0.35,
-      nose.spine.y + tipSy * 0.15 * step,
-      nose.spine.z + noseTangent.z * dist * 0.35,
-      tipSx * (1.05 - step * 0.12),
-      tipSy * (1.02 - step * 0.08),
-    );
-  }
-}
-
-/**
- * Snow mounds for the pine. Vertical bark is skipped: a thick shaft only gains
- * a cap where it faces the sky, and on the crown. Fine wood is buried completely.
- */
-export function collectTreeSnowPiles(tree: THREE.Object3D) {
-  const piles: SnowPile[] = [];
-  tree.updateMatrixWorld(true);
-  tree.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const tube = mesh.userData.tube as TubeMeta | undefined;
-    if (!tube) return;
-    const position = mesh.geometry.getAttribute("position");
-    const stride = tube.radial + 1;
-    if (!position || position.count < (tube.segments + 1) * stride) return;
-
-    const rings = readSnowRings(mesh, tube.segments, tube.radial);
-    const keep = rings.map((ring, index) => {
-      const tip = index === tube.segments;
-      if (ring.radius > 0.42) return tip || ring.up > 0.7;
-      if (ring.radius < 0.2) return true;
-      if (ring.up > 0.16) return true;
-      return tip || index <= 1;
-    });
-    const feathered = keep.map((on, index) => {
-      if (on) return true;
-      if (rings[index].radius > 0.42) return false;
-      return (keep[index - 1] ?? false) || (keep[index + 1] ?? false);
-    });
-
-    let runStart = -1;
-    for (let i = 0; i < feathered.length; i += 1) {
-      if (feathered[i]) {
-        if (runStart < 0) runStart = i;
-      } else if (runStart >= 0) {
-        appendSnowPiles(rings.slice(runStart, i), piles);
-        runStart = -1;
-      }
-    }
-    if (runStart >= 0) appendSnowPiles(rings.slice(runStart), piles);
-  });
-  return piles;
-}
-
 function snowflakeTexture(size = 32) {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y += 1) {
@@ -440,9 +171,9 @@ const MOUNTAIN_TARGETS = [
 ];
 
 /**
- * Winter: the needles fall and vanish, grass is buried, thick soft snow settles on
- * the ground and as tall caps on the limbs, snow falls, and the light turns pale and cool.
- * Vertical bark is left its own colour; snow sits on top of the wood instead of painting it.
+ * Winter: the needles fall and vanish, grass is buried, low drifts cover the ground,
+ * and a narrow ridge of snow settles on top of each limb. Vertical bark stays its own
+ * colour. Snow falls, and the light turns pale and cool.
  */
 export class WinterTransition {
   readonly flakeTexture: THREE.Texture;
@@ -465,9 +196,10 @@ export class WinterTransition {
   private readonly grassTarget: Float32Array;
 
   private readonly groundClumps: THREE.InstancedMesh;
-  private readonly branchSnow: THREE.InstancedMesh;
-  private readonly branchPile: Float32Array;
-  private readonly branchCount: number;
+  private readonly branchSnow: THREE.Mesh;
+  private readonly branchFinalY: Float32Array;
+  private readonly branchSink: Float32Array;
+  private branchEase = -1;
   private readonly clump: Float32Array; // x, y, z, sx, sy, sz, cos, sin, delay
   private readonly clumpTotal: number;
 
@@ -522,7 +254,7 @@ export class WinterTransition {
       this.grassTarget[i * 3 + 2] = colour.b;
     }
 
-    // Ground drifts stay low and wide. Snow on the pine is a separate tall blanket.
+    // Ground drifts stay low and wide. Limb snow is a separate narrow ridge.
     // The ground mesh is a darker white than the snow on the tree.
     this.clumpTotal = GROUND_CLUMPS;
     this.clump = new Float32Array(this.clumpTotal * 9);
@@ -558,28 +290,28 @@ export class WinterTransition {
     this.groundClumps.receiveShadow = true;
     if (this.groundClumps.instanceColor) this.groundClumps.instanceColor.needsUpdate = true;
 
-    const treePiles = collectTreeSnowPiles(parts.tree);
-    this.branchCount = treePiles.length;
-    this.branchPile = new Float32Array(Math.max(this.branchCount, 1) * 6);
-    const treePalette = TREE_SNOW_TINTS.map((hex) => new THREE.Color(hex));
+    const treeSnow = buildTreeSnowGeometry(parts.tree);
+    this.branchFinalY = treeSnow.finalY;
+    this.branchSink = treeSnow.sink;
     const branchMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(TREE_SNOW_TINTS[0]),
-      roughness: 0.96,
+      color: 0xffffff,
+      roughness: 0.92,
       metalness: 0,
       emissive: 0xdce9f6,
-      emissiveIntensity: 0.12,
+      emissiveIntensity: 0.16,
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
-    this.branchSnow = new THREE.InstancedMesh(snowClumpGeometry(), branchMaterial, Math.max(this.branchCount, 1));
-    for (let i = 0; i < this.branchCount; i += 1) {
-      const pile = treePiles[i];
-      this.branchPile.set([pile.x, pile.y, pile.z, pile.sx, pile.sy, pile.sz], i * 6);
-      this.branchSnow.setColorAt(i, treePalette[i % treePalette.length]);
-    }
-    this.writeBranchPiles(0);
-    this.branchSnow.count = 0;
+    this.branchSnow = new THREE.Mesh(treeSnow.geometry, branchMaterial);
+    this.branchSnow.visible = false;
     this.branchSnow.frustumCulled = false;
     this.branchSnow.receiveShadow = true;
-    if (this.branchSnow.instanceColor) this.branchSnow.instanceColor.needsUpdate = true;
+    this.branchSnow.castShadow = false;
+    this.branchSnow.renderOrder = 2;
+    this.writeBranchSnow(0);
     scene.add(this.groundClumps, this.branchSnow);
 
     // Little snow caps on the monk and the puppy.
@@ -650,7 +382,7 @@ export class WinterTransition {
     if (this.started) return;
     this.capture();
     this.groundClumps.count = GROUND_CLUMPS;
-    this.branchSnow.count = this.branchCount;
+    this.branchSnow.visible = true;
     this.flakes.visible = true;
     this.caps.forEach(({ mesh }) => {
       mesh.visible = true;
@@ -694,31 +426,20 @@ export class WinterTransition {
     };
   }
 
-  /** Branch mounds swell upward. Horizontal scale stays the footprint; vertical scale is the taller one. */
-  private writeBranchPiles(t: number) {
+  /** The ridge grows upward out of the wood. Width is already the final footprint. */
+  private writeBranchSnow(t: number) {
     const ease = t <= 0 ? 0 : easeOut(clamp01((t - 0.12) / 0.88));
-    const array = this.branchSnow.instanceMatrix.array as Float32Array;
-    for (let i = 0; i < this.branchCount; i += 1) {
-      const p = i * 6;
-      const o = i * 16;
-      array[o] = this.branchPile[p + 3] * ease;
-      array[o + 1] = 0;
-      array[o + 2] = 0;
-      array[o + 3] = 0;
-      array[o + 4] = 0;
-      array[o + 5] = this.branchPile[p + 4] * ease;
-      array[o + 6] = 0;
-      array[o + 7] = 0;
-      array[o + 8] = 0;
-      array[o + 9] = 0;
-      array[o + 10] = this.branchPile[p + 5] * ease;
-      array[o + 11] = 0;
-      array[o + 12] = this.branchPile[p];
-      array[o + 13] = this.branchPile[p + 1];
-      array[o + 14] = this.branchPile[p + 2];
-      array[o + 15] = 1;
+    if (Math.abs(ease - this.branchEase) < 1e-4) return;
+    const settled = ease >= 1 && this.branchEase < 1;
+    this.branchEase = ease;
+    const position = this.branchSnow.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) {
+      const sink = i < this.branchSink.length ? this.branchSink[i] : 0;
+      const full = i < this.branchFinalY.length ? this.branchFinalY[i] : position.getY(i);
+      position.setY(i, full - sink * (1 - ease));
     }
-    this.branchSnow.instanceMatrix.needsUpdate = true;
+    position.needsUpdate = true;
+    if (settled || ease < 1) this.branchSnow.geometry.computeVertexNormals();
   }
 
   private apply(t: number) {
@@ -795,7 +516,7 @@ export class WinterTransition {
       mesh.instanceMatrix.needsUpdate = true;
     };
     writeClumps(this.groundClumps, 0, GROUND_CLUMPS);
-    this.writeBranchPiles(t);
+    this.writeBranchSnow(t);
 
     const capEase = easeOut(clamp01((t - 0.35) / 0.65));
     this.caps.forEach(({ mesh, radii }) => mesh.scale.set(radii[0] * capEase, radii[1] * capEase, radii[2] * capEase));

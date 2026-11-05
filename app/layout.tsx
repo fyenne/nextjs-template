@@ -6,19 +6,9 @@ import React from "react";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Siming Yan | Data Scientist & Quantitative Modeler",
+  title: "你好，我是 Samo · 一棵关于我的树",
   description:
-    "Portfolio and resume of Siming Yan — Data Scientist in commodities trading specializing in freight analytics, time-series forecasting, AIS vessel modeling, and ML data engineering.",
-  keywords: [
-    "Siming Yan",
-    "Data Scientist",
-    "Commodities Trading",
-    "Freight Analytics",
-    "Time-Series Forecasting",
-    "Machine Learning",
-    "Quantitative Trading",
-  ],
-  authors: [{ name: "Siming Yan", url: "https://github.com/fyenne" }],
+    "雾里的一棵松，树下一个坐着的人。拖动四周看看，他会自己说话。",
 };
 
 export default function RootLayout({

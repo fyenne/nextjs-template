@@ -12,7 +12,11 @@ export interface SceneVisitor {
   /** Highest whole lap reached around the tree, 0 to 3. */
   laps: number;
   direction: "cw" | "ccw" | null;
+  /** When autumn was first earned. */
   autumnUnlockedAt?: string;
+  /** How many times autumn has been earned, once per page view that completed three laps. */
+  autumnUnlocks: number;
+  lastAutumnAt?: string;
 }
 
 interface SceneStore {
@@ -113,7 +117,11 @@ export function upsertVisitor(
     browser: describeBrowser(meta.userAgent),
     laps: 0,
     direction: null,
+    autumnUnlocks: 0,
   };
+
+  // Records written before unlocks were counted.
+  if (typeof visitor.autumnUnlocks !== "number") visitor.autumnUnlocks = visitor.autumnUnlockedAt ? 1 : 0;
 
   visitor.lastSeenAt = now;
   visitor.ip = meta.ip || visitor.ip;
@@ -121,12 +129,17 @@ export function upsertVisitor(
   visitor.browser = describeBrowser(visitor.userAgent);
   if (countVisit || !existing) visitor.visits += 1;
 
-  if (typeof update.laps === "number" && Number.isFinite(update.laps)) {
-    visitor.laps = Math.max(visitor.laps, Math.min(3, Math.max(0, Math.floor(update.laps))));
-  }
+  const reportedLaps =
+    typeof update.laps === "number" && Number.isFinite(update.laps)
+      ? Math.min(3, Math.max(0, Math.floor(update.laps)))
+      : 0;
+  visitor.laps = Math.max(visitor.laps, reportedLaps);
   if (update.direction === "cw" || update.direction === "ccw") visitor.direction = update.direction;
-  if (update.completed && visitor.laps >= 3 && !visitor.autumnUnlockedAt) {
-    visitor.autumnUnlockedAt = now;
+  // The scene always loads green, so each page view that finishes three laps is a new unlock.
+  if (update.completed && reportedLaps >= 3) {
+    visitor.autumnUnlockedAt = visitor.autumnUnlockedAt ?? now;
+    visitor.lastAutumnAt = now;
+    visitor.autumnUnlocks += 1;
   }
 
   store.visitors[id] = visitor;

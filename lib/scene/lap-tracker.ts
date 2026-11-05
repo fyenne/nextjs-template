@@ -35,13 +35,6 @@ export class LapTracker {
     return this.done;
   }
 
-  /** Marks the goal as already reached, e.g. for a returning visitor. */
-  restoreCompleted() {
-    this.done = true;
-    this.net = this.target * FULL_TURN;
-    this.bestFullLap = this.target;
-  }
-
   update(x: number, z: number): LapState {
     let justCompleted = false;
     let newFullLap: number | null = null;

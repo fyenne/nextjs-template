@@ -31,8 +31,14 @@ function requestMeta(req: NextRequest) {
   return { ip: getClientIp(req), userAgent: (req.headers.get("user-agent") || "").slice(0, 400) };
 }
 
+/** `autumn` and `unlocks` are memory only: the scene itself always loads green. */
 function payload(visitor: SceneVisitor) {
-  return { id: visitor.id, autumn: Boolean(visitor.autumnUnlockedAt), laps: visitor.laps };
+  return {
+    id: visitor.id,
+    autumn: visitor.autumnUnlocks > 0 || Boolean(visitor.autumnUnlockedAt),
+    unlocks: visitor.autumnUnlocks || (visitor.autumnUnlockedAt ? 1 : 0),
+    laps: visitor.laps,
+  };
 }
 
 function withCookie(req: NextRequest, response: NextResponse, id: string) {
@@ -48,9 +54,9 @@ function withCookie(req: NextRequest, response: NextResponse, id: string) {
 }
 
 /**
- * Registers a visit and reports whether this visitor already unlocked autumn.
- * The id comes from the query string, falling back to the cookie so a visitor
- * who cleared localStorage is still recognised.
+ * Registers a visit and reports what this visitor has earned before. The id comes
+ * from the query string, falling back to the cookie so a visitor who cleared
+ * localStorage is still recognised.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -69,7 +75,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** Records lap progress and, once three laps are done, the autumn unlock. */
+/** Records lap progress and, once three laps are done in a page view, counts an autumn unlock. */
 export async function POST(req: NextRequest) {
   try {
     const meta = requestMeta(req);

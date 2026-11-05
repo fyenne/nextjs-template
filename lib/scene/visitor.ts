@@ -1,9 +1,19 @@
 import type { LapDirection } from "./lap-tracker";
 
 const ID_KEY = "tree_visitor_id";
-const UNLOCK_KEY = "tree_autumn_unlocked";
+// Written by an earlier version that restored autumn on load; now removed on sight.
+const LEGACY_UNLOCK_KEY = "tree_autumn_unlocked";
 
-export type VisitorStatus = { id: string; autumn: boolean; laps: number };
+export type VisitorStatus = {
+  id: string;
+  /** True if this visitor has ever earned autumn. It never changes how the scene loads. */
+  autumn: boolean;
+  /** How many times this visitor has earned autumn. */
+  unlocks: number;
+  laps: number;
+};
+
+type ServerStatus = { id: string | null; autumn: boolean; unlocks?: number; laps: number };
 
 function readStorage(key: string): string | null {
   try {
@@ -36,11 +46,6 @@ function mintId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** True when this browser already earned autumn, so the first frame can be golden. */
-export function cachedAutumnUnlocked(): boolean {
-  return readStorage(UNLOCK_KEY) === "1";
-}
-
 export type ProgressReport = { laps: number; direction: LapDirection | null; completed?: boolean };
 
 export class VisitorSession {
@@ -52,31 +57,34 @@ export class VisitorSession {
    */
   async load(signal?: AbortSignal): Promise<VisitorStatus | null> {
     try {
+      try {
+        window.localStorage.removeItem(LEGACY_UNLOCK_KEY);
+      } catch {
+        // Storage can be unavailable; nothing to clean up then.
+      }
       const stored = readStorage(ID_KEY);
       const query = stored ? `?id=${encodeURIComponent(stored)}` : "";
       let response = await fetch(`/api/autumn${query}`, { cache: "no-store", signal });
       if (!response.ok) return null;
-      let status = (await response.json()) as { id: string | null; autumn: boolean; laps: number };
+      let status = (await response.json()) as ServerStatus;
 
       if (!status.id) {
         const minted = mintId();
         response = await fetch(`/api/autumn?id=${minted}`, { cache: "no-store", signal });
         if (!response.ok) return null;
-        status = (await response.json()) as { id: string | null; autumn: boolean; laps: number };
+        status = (await response.json()) as ServerStatus;
       }
       if (!status.id) return null;
 
       this.id = status.id;
       writeStorage(ID_KEY, status.id);
-      if (status.autumn) writeStorage(UNLOCK_KEY, "1");
-      return { id: status.id, autumn: status.autumn, laps: status.laps };
+      return { id: status.id, autumn: status.autumn, unlocks: status.unlocks ?? (status.autumn ? 1 : 0), laps: status.laps };
     } catch {
       return null;
     }
   }
 
   report(progress: ProgressReport) {
-    if (progress.completed) writeStorage(UNLOCK_KEY, "1");
     const id = this.id ?? readStorage(ID_KEY);
     if (!id) return;
     void fetch("/api/autumn", {

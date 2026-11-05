@@ -5,8 +5,8 @@ import * as THREE from "three";
 import { AutumnTransition } from "@/lib/scene/autumn";
 import { TREE_TRUNK_RADIUS, stepDog, type DogMotion } from "@/lib/scene/dog-motion";
 import { LAPS_TO_UNLOCK, LapTracker } from "@/lib/scene/lap-tracker";
-import { createPuppy } from "@/lib/scene/puppy";
-import { VisitorSession, cachedAutumnUnlocked } from "@/lib/scene/visitor";
+import { createPuppy, easeTongue } from "@/lib/scene/puppy";
+import { VisitorSession } from "@/lib/scene/visitor";
 import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
 // A procedural Chinese pine: dark fluted bark, wind-swept limbs, and sparse
@@ -1086,25 +1086,17 @@ export default function Home() {
     const dogRay = new THREE.Raycaster();
     let walkPhase = 0;
 
-    // Three full laps around the tree turn the scene to autumn. Progress is
-    // recorded per visitor uuid; the browser and IP are stored with it for logging.
+    // Three full laps around the tree turn the scene to autumn for the rest of this
+    // page view. Every load starts green with a fresh lap count; the server only
+    // remembers, per visitor uuid, how many times autumn has been earned (plus the
+    // browser and IP, for logging).
     const laps = new LapTracker();
     const autumn = new AutumnTransition(foliage, grass, { scene, renderer, hemisphere, key, rim });
     const visitor = new VisitorSession();
     const abortVisitor = new AbortController();
-    if (cachedAutumnUnlocked()) {
-      laps.restoreCompleted();
-      autumn.start(0, true);
-    }
+    let earnedBefore = 0;
     void visitor.load(abortVisitor.signal).then((status) => {
-      if (!status) return;
-      if (status.autumn) {
-        laps.restoreCompleted();
-        autumn.start(performance.now(), reduceMotion);
-      } else if (laps.completed) {
-        // The browser remembered autumn but the server did not, so heal the record.
-        visitor.report({ laps: LAPS_TO_UNLOCK, direction: null, completed: true });
-      }
+      if (status) earnedBefore = status.unlocks;
     });
 
     // WebGL speech bubble. Random Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
@@ -1487,15 +1479,17 @@ export default function Home() {
       }
       if (lapState.justCompleted) {
         visitor.report({ laps: LAPS_TO_UNLOCK, direction: lapState.direction, completed: true });
+        earnedBefore += 1;
         autumn.start(now, reduceMotion);
       }
       autumn.update(now);
 
       if (dogCoordsRef.current) {
         const formatAxis = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+        const earned = earnedBefore > 0 ? `   earned x${earnedBefore}` : "";
         const lapText = lapState.completed
-          ? "autumn unlocked"
-          : `laps ${lapState.direction === "ccw" ? "↺" : "↻"} ${lapState.laps.toFixed(1)}/${LAPS_TO_UNLOCK}`;
+          ? `autumn unlocked${earned}`
+          : `laps ${lapState.direction === "ccw" ? "↺" : "↻"} ${lapState.laps.toFixed(1)}/${LAPS_TO_UNLOCK}${earned}`;
         dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}`;
       }
 
@@ -1512,8 +1506,7 @@ export default function Home() {
         const flop = Math.sin(walkPhase * 2 + index) * 0.12 * gait;
         ear.rotation.z += (side * (0.42 + flop) - ear.rotation.z) * 0.35;
       });
-      const tongueTarget = gait > 0 ? 1 : 0.0001;
-      puppy.tongue.scale.setScalar(puppy.tongue.scale.x + (tongueTarget - puppy.tongue.scale.x) * 0.25);
+      easeTongue(puppy, gait > 0);
       puppy.tail.rotation.x = 0.22 + Math.sin(now * 0.006) * 0.05;
       puppy.tail.rotation.y = Math.sin(now * (dogMoving ? 0.013 : 0.007)) * (dogMoving ? 0.7 : 0.28);
       puppy.tail.rotation.z = 0;

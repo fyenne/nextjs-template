@@ -5,7 +5,7 @@ export type Puppy = {
   body: THREE.Group;
   head: THREE.Group;
   ears: THREE.Group[];
-  tongue: THREE.Mesh;
+  tongue: THREE.Group;
   tail: THREE.Group;
   legs: THREE.Group[];
   /** Collision radius around the dog's centre, used to keep it off the trunk. */
@@ -13,6 +13,15 @@ export type Puppy = {
 };
 
 type Vec3 = [number, number, number];
+
+/** Pivot scale while the tongue is tucked away. */
+export const TONGUE_HIDDEN = 0.0001;
+
+/** Eases the tongue pivot towards out (1) or in (hidden), never touching the mesh's own size. */
+export function easeTongue(puppy: Puppy, out: boolean, rate = 0.25) {
+  const target = out ? 1 : TONGUE_HIDDEN;
+  puppy.tongue.scale.setScalar(puppy.tongue.scale.x + (target - puppy.tongue.scale.x) * rate);
+}
 
 /** Depth of an ellipsoid's front surface at (x, y), for sticking face lines onto it. */
 function surfaceZ(radii: Vec3, center: Vec3, x: number, y: number) {
@@ -130,8 +139,13 @@ export function createPuppy(): Puppy {
     faceLine(mouthPoints, muzzleZ, 0.012);
   }
 
-  const tongue = add(head, sphere, tonguePink, [0, -0.2, 0.41], [0.045, 0.012, 0.06], [0.5, 0, 0]);
-  tongue.scale.setScalar(0.0001);
+  // The pivot is what gets scaled to poke the tongue out; the mesh keeps its own small size.
+  const tongue = new THREE.Group();
+  tongue.position.set(0, -0.2, 0.41);
+  tongue.rotation.x = 0.5;
+  tongue.scale.setScalar(TONGUE_HIDDEN);
+  head.add(tongue);
+  add(tongue, sphere, tonguePink, [0, 0, 0], [0.045, 0.012, 0.06]);
 
   const ears: THREE.Group[] = [];
   for (const side of [-1, 1]) {

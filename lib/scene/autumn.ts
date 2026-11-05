@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { seeded } from "./random";
 
 /** Wall-clock length of the green to gold change. */
 export const AUTUMN_TRANSITION_SECONDS = 2;
@@ -12,17 +13,6 @@ const MAX_STAGGER = 0.45;
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
-
-function seeded(seed: number) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 type Layer = {
   mesh: THREE.InstancedMesh;
@@ -137,6 +127,13 @@ export class AutumnTransition {
     const t = clamp01((now - this.startedAt) / (AUTUMN_TRANSITION_SECONDS * 1000));
     this.progress = t;
     this.apply(t);
+  }
+
+  /** Jumps to the end of the change if it is still under way. */
+  finish() {
+    if (this.startedAt === null || this.progress >= 1) return;
+    this.progress = 1;
+    this.apply(1);
   }
 
   private apply(t: number) {

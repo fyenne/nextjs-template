@@ -10,10 +10,18 @@ export type VisitorStatus = {
   autumn: boolean;
   /** How many times this visitor has earned autumn. */
   unlocks: number;
+  /** The same for winter. */
+  winterUnlocks: number;
   laps: number;
 };
 
-type ServerStatus = { id: string | null; autumn: boolean; unlocks?: number; laps: number };
+type ServerStatus = {
+  id: string | null;
+  autumn: boolean;
+  unlocks?: number;
+  winterUnlocks?: number;
+  laps: number;
+};
 
 function readStorage(key: string): string | null {
   try {
@@ -46,7 +54,13 @@ function mintId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export type ProgressReport = { laps: number; direction: LapDirection | null; completed?: boolean };
+export type ProgressReport = {
+  laps: number;
+  direction: LapDirection | null;
+  completed?: boolean;
+  /** The stage the completed laps unlocked. */
+  stage?: "autumn" | "winter";
+};
 
 export class VisitorSession {
   private id: string | null = null;
@@ -78,7 +92,13 @@ export class VisitorSession {
 
       this.id = status.id;
       writeStorage(ID_KEY, status.id);
-      return { id: status.id, autumn: status.autumn, unlocks: status.unlocks ?? (status.autumn ? 1 : 0), laps: status.laps };
+      return {
+        id: status.id,
+        autumn: status.autumn,
+        unlocks: status.unlocks ?? (status.autumn ? 1 : 0),
+        winterUnlocks: status.winterUnlocks ?? 0,
+        laps: status.laps,
+      };
     } catch {
       return null;
     }

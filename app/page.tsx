@@ -311,6 +311,18 @@ function makeBeamTexture() {
 }
 
 const GALACTIC_FONT = "700 108px Galactic, Kronthul, sans-serif";
+const INTRO_FONT = "600 46px Georgia, 'Palatino Linotype', Palatino, serif";
+
+type SpeechMode = "glyphs" | "intro";
+
+/**
+ * Winter only. One sentence, revealed a word at a time.
+ * The space in "hello !" is intentional, so the mark arrives as its own pop.
+ */
+const WINTER_GREETING = "hello ! welcome to siming yan's inner garden, lets start our journey to know more of me";
+const WINTER_WORDS = WINTER_GREETING.split(" ");
+const WORD_POP_MS = 420;
+const GREETING_HOLD_MS = 5200;
 
 /** Meaningless Standard Galactic glyphs, 2–12 letters. */
 function nextMonkSnippet(previous = "") {
@@ -326,20 +338,42 @@ function nextMonkSnippet(previous = "") {
   return "QX";
 }
 
-function makeBubbleTexture(text: string) {
+function wrapLines(measure: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (measure.measureText(next).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length > 0 ? lines : [text];
+}
+
+function makeBubbleTexture(text: string, mode: SpeechMode = "glyphs") {
+  const intro = mode === "intro";
   const measure = document.createElement("canvas").getContext("2d");
-  let textWidth = text.length * 78;
+  const font = intro ? INTRO_FONT : GALACTIC_FONT;
+  let lines = [text];
+  let textWidth = text.length * (intro ? 26 : 78);
   if (measure) {
-    measure.font = GALACTIC_FONT;
-    textWidth = Math.ceil(measure.measureText(text).width);
+    measure.font = font;
+    if (intro) lines = wrapLines(measure, text, 780);
+    textWidth = Math.ceil(Math.max(...lines.map((line) => measure.measureText(line).width), 1));
   }
-  const padX = 56;
-  const padY = 36;
+  const padX = intro ? 44 : 56;
+  const padY = intro ? 28 : 36;
   const tailH = 42;
   const tailW = 36;
   const radius = 40;
-  const bodyW = Math.max(textWidth + padX * 2, 280);
-  const bodyH = 108 + padY * 2;
+  const lineH = intro ? 58 : 108;
+  const bodyW = Math.max(textWidth + padX * 2, intro ? 180 : 280);
+  const bodyH = intro ? lines.length * lineH + padY * 2 : 108 + padY * 2;
   const cssW = bodyW;
   const cssH = bodyH + tailH;
   const ratio = 2;
@@ -377,15 +411,21 @@ function makeBubbleTexture(text: string) {
     ctx.stroke();
 
     ctx.fillStyle = "#14110d";
-    ctx.font = GALACTIC_FONT;
+    ctx.font = font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, cssW / 2, (bodyH - 2) / 2 + 2);
+    if (intro) {
+      lines.forEach((line, index) => {
+        ctx.fillText(line, cssW / 2, padY + lineH * (index + 0.5) + 2);
+      });
+    } else {
+      ctx.fillText(text, cssW / 2, (bodyH - 2) / 2 + 2);
+    }
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
-  return { texture, width: cssW, height: cssH };
+  return { texture, width: cssW, height: cssH, lines: lines.length };
 }
 
 function terrainHeight(x: number, z: number) {
@@ -715,6 +755,11 @@ export default function Home() {
       const mesh = new THREE.Mesh(taperedTube(curve, radiusStart, radiusEnd, options), barkMaterial);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      // Winter snow walks these rings. The last radial vertex repeats the first.
+      mesh.userData.tube = {
+        segments: options?.segments ?? 32,
+        radial: options?.radial ?? 10,
+      };
       tree.add(mesh);
       return mesh;
     };
@@ -1107,9 +1152,12 @@ export default function Home() {
       earnedWinter = Math.max(earnedWinter, status.winterUnlocks);
     });
 
-    // WebGL speech bubble. Random Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
-    // Hidden until the face is ready so the first paint is not Latin.
+    // WebGL speech bubble. Before winter: Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
+    // In winter: the garden sentence, one new word at a time.
+    // Hidden until the face is ready so the first glyph paint is not Latin.
     const BUBBLE_WORLD_HEIGHT = 1.76;
+    let speechMode: SpeechMode = "glyphs";
+    let wordCount = 1;
     let spoken = nextMonkSnippet();
     let galacticReady = false;
     let bubbleTexture = makeBubbleTexture(" ");
@@ -1127,27 +1175,42 @@ export default function Home() {
     bubble.visible = false;
     scene.add(bubble);
 
-    const paintBubble = (text: string) => {
-      const next = makeBubbleTexture(text);
+    const paintBubble = (text: string, mode: SpeechMode) => {
+      const next = makeBubbleTexture(text, mode);
       bubbleTexture.texture.dispose();
       bubbleTexture = next;
       bubble.material.map = next.texture;
       bubble.material.needsUpdate = true;
-      bubble.scale.set(BUBBLE_WORLD_HEIGHT * (next.width / next.height), BUBBLE_WORLD_HEIGHT, 1);
+      const worldH = mode === "intro" ? Math.min(3.15, 1.05 + next.lines * 0.46) : BUBBLE_WORLD_HEIGHT;
+      bubble.scale.set(worldH * (next.width / next.height), worldH, 1);
     };
 
-    const sayNext = () => {
-      spoken = nextMonkSnippet(spoken);
-      if (galacticReady) paintBubble(spoken);
+    const showSpeech = () => {
+      if (speechMode === "intro") paintBubble(WINTER_WORDS.slice(0, wordCount).join(" "), "intro");
+      else if (galacticReady) paintBubble(spoken, "glyphs");
     };
+
     let chatterTimer = 0;
     const scheduleChatter = () => {
+      const sentenceFull = wordCount >= WINTER_WORDS.length;
+      const delay = speechMode === "intro" ? (sentenceFull ? GREETING_HOLD_MS : WORD_POP_MS) : 2000 + Math.random() * 4000;
       chatterTimer = window.setTimeout(() => {
-        sayNext();
+        if (speechMode === "intro") wordCount = sentenceFull ? 1 : wordCount + 1;
+        else spoken = nextMonkSnippet(spoken);
+        showSpeech();
         scheduleChatter();
-      }, 2000 + Math.random() * 4000);
+      }, delay);
     };
     scheduleChatter();
+
+    const beginIntro = () => {
+      if (speechMode === "intro") return;
+      speechMode = "intro";
+      wordCount = 1;
+      showSpeech();
+      window.clearTimeout(chatterTimer);
+      scheduleChatter();
+    };
 
     let cancelled = false;
     let fontLoad = Promise.resolve();
@@ -1158,12 +1221,12 @@ export default function Home() {
       .then(() => {
         if (cancelled) return;
         galacticReady = true;
-        paintBubble(spoken);
+        if (speechMode === "glyphs") paintBubble(spoken, "glyphs");
       })
       .catch(() => {
         if (cancelled) return;
         galacticReady = true;
-        paintBubble(spoken);
+        if (speechMode === "glyphs") paintBubble(spoken, "glyphs");
       });
 
     // The monk faces +Z in local space; rotate by his yaw for the world vector.
@@ -1222,7 +1285,8 @@ export default function Home() {
       foliage,
       grass,
       litter,
-      snowy: [groundMaterial, barkMaterial, stoneMaterial],
+      snowy: [],
+      groundSnowy: [groundMaterial, stoneMaterial],
       mountains: mountainMaterials,
       groundHeight: terrainHeight,
       caps: [
@@ -1237,6 +1301,7 @@ export default function Home() {
     if (window.location.hash.includes("winter")) {
       stages.jumpTo("winter");
       winter.start(0, true);
+      beginIntro();
     } else if (window.location.hash.includes("autumn")) {
       stages.jumpTo("autumn");
       autumn.start(0, true);
@@ -1469,7 +1534,8 @@ export default function Home() {
       // so it never pops when you swing the camera around him.
       const toCamera = new THREE.Vector3().subVectors(camera.position, monk.position).normalize();
       const facing = monkForward.dot(toCamera);
-      const bubbleVisible = galacticReady ? THREE.MathUtils.smoothstep(facing, -0.2, 0.5) : 0;
+      const bubbleVisible =
+        speechMode === "intro" || galacticReady ? THREE.MathUtils.smoothstep(facing, -0.2, 0.5) : 0;
       bubble.material.opacity = 0.94 * bubbleVisible;
       bubble.visible = bubbleVisible > 0.02;
       if (bubble.visible) {
@@ -1527,6 +1593,7 @@ export default function Home() {
         earnedWinter += 1;
         autumn.finish();
         winter.start(now, reduceMotion);
+        beginIntro();
       }
       autumn.update(now);
       winter.update(now, reduceMotion);

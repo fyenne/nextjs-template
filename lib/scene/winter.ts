@@ -6,11 +6,18 @@ export const WINTER_TRANSITION_SECONDS = 2;
 
 type Vec3 = [number, number, number];
 
-const SNOW_GRASS = ["#f5f9fc", "#e8f0f7", "#dde8f1", "#eef4f9", "#d6e3ee"];
-const SNOW_TINTS = ["#ffffff", "#f7fbff", "#ecf3fa", "#f1f7fc"];
+const SNOW_GRASS = ["#e4edf4", "#d7e2ec", "#d0dbe6", "#e8eef4", "#c9d6e2"];
+/** Bright snow on the pine. */
+const TREE_SNOW_TINTS = ["#ffffff", "#f7fbff", "#ecf3fa", "#f1f7fc"];
+const TREE_SNOW_RGB: readonly [number, number, number] = [0.94, 0.97, 1.0];
+/**
+ * Ground snow, a step under the tree white. Near-white instance tints sit on a
+ * darker base material, so the clearing does not get darkened twice.
+ */
+const GROUND_SNOW_TINTS = ["#ffffff", "#f3f7fb", "#eaf1f6", "#f7fafc"];
+const GROUND_SNOW_RGB: readonly [number, number, number] = [0.84, 0.88, 0.93];
 const GROUND_MOUNDS = 1800;
 const GROUND_CLUMPS = 6200;
-const BRANCH_CLUMPS = 2200;
 const FLAKES = 3200;
 const FLAKE_WIDTH = 46;
 const FLAKE_HEIGHT = 24;
@@ -32,7 +39,12 @@ export type SnowUniform = { value: number };
  * Lets a standard material turn white where its surface faces upwards, driven by
  * `uniform.value` (0 = bare, 1 = covered). Must run before the material first renders.
  */
-export function patchSnowMaterial(material: THREE.MeshStandardMaterial, uniform: SnowUniform) {
+export function patchSnowMaterial(
+  material: THREE.MeshStandardMaterial,
+  uniform: SnowUniform,
+  snowRgb: readonly [number, number, number] = TREE_SNOW_RGB,
+) {
+  const snowLiteral = `vec3(${snowRgb.map((channel) => channel.toFixed(3)).join(", ")})`;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSnow = uniform;
     shader.vertexShader = shader.vertexShader
@@ -67,7 +79,7 @@ export function patchSnowMaterial(material: THREE.MeshStandardMaterial, uniform:
            float facing = clamp(snowNormal.y, 0.0, 1.0);
            // Upward faces are fully covered; sides catch soft, irregular plastering.
            float cover = uSnow * smoothstep(-0.55, 0.4, facing + (grain - 0.5) * 0.8);
-           vec3 snowColor = vec3(0.94, 0.97, 1.0) * (0.92 + fine * 0.1);
+           vec3 snowColor = ${snowLiteral} * (0.92 + fine * 0.1);
            diffuseColor.rgb = mix(diffuseColor.rgb, snowColor, cover);
            roughnessFactor = mix(roughnessFactor, 1.0, cover);
          }`,
@@ -93,6 +105,275 @@ function snowClumpGeometry() {
   }
   geometry.computeVertexNormals();
   return geometry;
+}
+
+const SNOW_UP = new THREE.Vector3(0, 1, 0);
+
+type TubeMeta = { segments: number; radial: number };
+
+type SnowRing = {
+  spine: THREE.Vector3;
+  ridge: THREE.Vector3;
+  radius: number;
+  /** 1 when the crest faces the sky, 0 when the tube is a vertical shaft. */
+  up: number;
+  /** 0 at the root of this tube, 1 at the tip. */
+  t: number;
+};
+
+function smoothSeries(values: number[], radius: number) {
+  const out = new Array<number>(values.length);
+  for (let i = 0; i < values.length; i += 1) {
+    let acc = 0;
+    let wsum = 0;
+    const span = Math.max(0, Math.min(radius, values.length - 1));
+    for (let k = -span; k <= span; k += 1) {
+      const j = Math.min(values.length - 1, Math.max(0, i + k));
+      const w = span + 1 - Math.abs(k);
+      acc += values[j] * w;
+      wsum += w;
+    }
+    out[i] = acc / wsum;
+  }
+  return out;
+}
+
+function dilateMax(values: number[], radius: number) {
+  const out = new Array<number>(values.length);
+  const span = Math.max(0, Math.min(radius, values.length - 1));
+  for (let i = 0; i < values.length; i += 1) {
+    let m = 0;
+    for (let k = -span; k <= span; k += 1) {
+      const j = Math.min(values.length - 1, Math.max(0, i + k));
+      m = Math.max(m, values[j]);
+    }
+    out[i] = m;
+  }
+  return out;
+}
+
+/**
+ * A pile that gathers upward. `height` is the column of snow and `halfWidth`
+ * is half of the horizontal footprint, so the pile is taller than it is wide.
+ * Thick shafts stay narrow: a wide cap on vertical bark reads as a white wall.
+ * Limbs get a deeper coat, and joints and tips (`t` near 0 or 1) a little more,
+ * so the woody knots sit inside the blanket.
+ */
+function snowPile(radius: number, t: number, up: number) {
+  const node = Math.exp(-t * 7) + Math.exp(-(1 - t) * 5);
+  // Fine wood is the leaf scar and the twig tip. Bury the whole knot.
+  // The coat stays taller than it is wide.
+  if (radius < 0.2) {
+    const halfWidth = Math.max(0.11, radius * 2.4) * (1 + 0.15 * node);
+    const height = Math.max(halfWidth * 2.6, 0.32 + 0.08 * node);
+    return { halfWidth, height, embed: Math.max(radius * 1.6, 0.07) };
+  }
+  if (radius > 0.42) {
+    const halfWidth = Math.min(0.16, Math.max(0.05, radius * 0.1));
+    const height = Math.max(halfWidth * 2.5, 0.22);
+    return { halfWidth, height, embed: Math.min(0.08, radius * 0.2) };
+  }
+  let halfWidth = Math.max(0.12, radius * 0.82) * (1 + 0.45 * node);
+  let height = Math.max(halfWidth * 2.8, radius * (2.3 + 1.1 * node), 0.34);
+  // A steep joint has no broad top. Cap the knot without painting a side stripe.
+  if (up < 0.22) {
+    halfWidth = Math.max(halfWidth, Math.min(radius * 1.2, 0.2));
+    height = Math.max(height, halfWidth * 2.4);
+  }
+  const embed = Math.max(0.04, Math.min(radius * 0.95, height * 0.42));
+  return { halfWidth, height, embed };
+}
+
+function readSnowRings(mesh: THREE.Mesh, segments: number, radial: number): SnowRing[] {
+  const position = mesh.geometry.getAttribute("position");
+  const stride = radial + 1;
+  const rings: SnowRing[] = [];
+  const v = new THREE.Vector3();
+  for (let i = 0; i <= segments; i += 1) {
+    const spine = new THREE.Vector3();
+    const ridge = new THREE.Vector3();
+    let bestUp = -Infinity;
+    for (let j = 0; j < radial; j += 1) {
+      v.fromBufferAttribute(position, i * stride + j).applyMatrix4(mesh.matrixWorld);
+      spine.add(v);
+    }
+    spine.multiplyScalar(1 / radial);
+    for (let j = 0; j < radial; j += 1) {
+      v.fromBufferAttribute(position, i * stride + j).applyMatrix4(mesh.matrixWorld);
+      const rise = v.y - spine.y;
+      if (rise > bestUp) {
+        bestUp = rise;
+        ridge.copy(v);
+      }
+    }
+    const radius = Math.max(0.001, ridge.distanceTo(spine));
+    rings.push({
+      spine,
+      ridge,
+      radius,
+      up: THREE.MathUtils.clamp(bestUp / radius, 0, 1),
+      t: segments === 0 ? 1 : i / segments,
+    });
+  }
+  return rings;
+}
+
+/** Crest the pile sits on. Thin wood and vertical shafts are covered from the centre, so a side knot cannot poke out. */
+function crestOf(ring: SnowRing) {
+  if (ring.radius < 0.2 || ring.up < 0.18) return ring.spine.clone();
+  return ring.ridge.clone();
+}
+
+function densifyRings(rings: SnowRing[]) {
+  if (rings.length < 2) return rings;
+  const out: SnowRing[] = [];
+  for (let i = 0; i < rings.length - 1; i += 1) {
+    const a = rings[i];
+    const b = rings[i + 1];
+    out.push(a);
+    out.push({
+      spine: a.spine.clone().lerp(b.spine, 0.5),
+      ridge: a.ridge.clone().lerp(b.ridge, 0.5),
+      radius: (a.radius + b.radius) * 0.5,
+      up: (a.up + b.up) * 0.5,
+      t: (a.t + b.t) * 0.5,
+    });
+  }
+  out.push(rings[rings.length - 1]);
+  return out;
+}
+
+export type SnowPile = { x: number; y: number; z: number; sx: number; sy: number; sz: number };
+
+function pushPile(out: SnowPile[], x: number, y: number, z: number, sx: number, sy: number) {
+  const horizontal = Math.max(0.04, sx);
+  const vertical = Math.max(sy, horizontal * 1.45);
+  out.push({ x, y, z, sx: horizontal, sy: vertical, sz: horizontal });
+}
+
+/** Soft mounds along a crest. Each mound is taller than it is wide, and they overlap into one blanket. */
+function appendSnowPiles(ringsIn: SnowRing[], out: SnowPile[]) {
+  const rings = densifyRings(ringsIn);
+  const n = rings.length;
+  if (n === 0) return;
+
+  const tangents: THREE.Vector3[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const prev = rings[Math.max(0, i - 1)].spine;
+    const next = rings[Math.min(n - 1, i + 1)].spine;
+    const tangent = next.clone().sub(prev);
+    if (tangent.lengthSq() < 1e-8) tangent.copy(SNOW_UP);
+    else tangent.normalize();
+    tangents.push(tangent);
+  }
+
+  const last = n - 1;
+  const reach = Math.max(rings[last].radius * 2.4, 0.2);
+  const nose: SnowRing = {
+    spine: rings[last].spine.clone().addScaledVector(tangents[last], reach),
+    ridge: rings[last].ridge.clone().addScaledVector(tangents[last], reach),
+    radius: Math.max(rings[last].radius, 0.05),
+    up: rings[last].up,
+    t: 1,
+  };
+  const samples = rings.concat(nose);
+  const noseTangent = tangents[last].clone();
+
+  const sized = samples.map((ring) => snowPile(ring.radius, ring.t, ring.up));
+  const win = Math.min(11, Math.max(2, Math.floor(samples.length / 2)));
+  const height = smoothSeries(
+    dilateMax(
+      sized.map((pile) => pile.height),
+      win,
+    ),
+    Math.min(5, win),
+  );
+  const halfWidth = smoothSeries(
+    dilateMax(
+      sized.map((pile) => pile.halfWidth),
+      win,
+    ),
+    Math.min(5, win),
+  );
+  const crests = samples.map((ring) => crestOf(ring));
+  const crestX = smoothSeries(
+    crests.map((crest) => crest.x),
+    Math.min(4, win),
+  );
+  const crestZ = smoothSeries(
+    crests.map((crest) => crest.z),
+    Math.min(4, win),
+  );
+  const crestY = smoothSeries(
+    crests.map((crest) => crest.y),
+    Math.min(6, win),
+  );
+
+  for (let i = 0; i < samples.length; i += 1) {
+    const encase = samples[i].radius < 0.2;
+    const sy = height[i] * 0.55;
+    const y = encase ? crestY[i] : crestY[i] + sy * 0.22;
+    pushPile(out, crestX[i], y, crestZ[i], halfWidth[i], sy);
+  }
+
+  // Two more mounds past the wood, so the tip knot is inside the bud rather than sticking out of it.
+  const tipSy = height[samples.length - 1] * 0.55;
+  const tipSx = halfWidth[samples.length - 1];
+  for (let step = 1; step <= 2; step += 1) {
+    const dist = reach * (0.45 + step * 0.4);
+    pushPile(
+      out,
+      nose.spine.x + noseTangent.x * dist * 0.35,
+      nose.spine.y + tipSy * 0.15 * step,
+      nose.spine.z + noseTangent.z * dist * 0.35,
+      tipSx * (1.05 - step * 0.12),
+      tipSy * (1.02 - step * 0.08),
+    );
+  }
+}
+
+/**
+ * Snow mounds for the pine. Vertical bark is skipped: a thick shaft only gains
+ * a cap where it faces the sky, and on the crown. Fine wood is buried completely.
+ */
+export function collectTreeSnowPiles(tree: THREE.Object3D) {
+  const piles: SnowPile[] = [];
+  tree.updateMatrixWorld(true);
+  tree.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const tube = mesh.userData.tube as TubeMeta | undefined;
+    if (!tube) return;
+    const position = mesh.geometry.getAttribute("position");
+    const stride = tube.radial + 1;
+    if (!position || position.count < (tube.segments + 1) * stride) return;
+
+    const rings = readSnowRings(mesh, tube.segments, tube.radial);
+    const keep = rings.map((ring, index) => {
+      const tip = index === tube.segments;
+      if (ring.radius > 0.42) return tip || ring.up > 0.7;
+      if (ring.radius < 0.2) return true;
+      if (ring.up > 0.16) return true;
+      return tip || index <= 1;
+    });
+    const feathered = keep.map((on, index) => {
+      if (on) return true;
+      if (rings[index].radius > 0.42) return false;
+      return (keep[index - 1] ?? false) || (keep[index + 1] ?? false);
+    });
+
+    let runStart = -1;
+    for (let i = 0; i < feathered.length; i += 1) {
+      if (feathered[i]) {
+        if (runStart < 0) runStart = i;
+      } else if (runStart >= 0) {
+        appendSnowPiles(rings.slice(runStart, i), piles);
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0) appendSnowPiles(rings.slice(runStart), piles);
+  });
+  return piles;
 }
 
 function snowflakeTexture(size = 32) {
@@ -124,8 +405,10 @@ export type WinterParts = {
   foliage: THREE.InstancedMesh;
   grass: THREE.InstancedMesh;
   litter: THREE.InstancedMesh;
-  /** Ground, bark and stones: they turn white where they face upwards. */
+  /** Surfaces whose upward faces take a snow tint. Pine bark is not one of them. */
   snowy: THREE.MeshStandardMaterial[];
+  /** Ground, and stones in it. A step darker than the tree snow. */
+  groundSnowy: THREE.MeshStandardMaterial[];
   /** Far to near ridgelines. */
   mountains: THREE.MeshBasicMaterial[];
   caps: SnowCap[];
@@ -158,7 +441,8 @@ const MOUNTAIN_TARGETS = [
 
 /**
  * Winter: the needles fall and vanish, grass is buried, thick soft snow settles on
- * the ground and on the branches, snow falls, and the light turns pale and cool.
+ * the ground and as tall caps on the limbs, snow falls, and the light turns pale and cool.
+ * Vertical bark is left its own colour; snow sits on top of the wood instead of painting it.
  */
 export class WinterTransition {
   readonly flakeTexture: THREE.Texture;
@@ -180,7 +464,10 @@ export class WinterTransition {
   private readonly grassDelay: Float32Array;
   private readonly grassTarget: Float32Array;
 
-  private readonly clumps: THREE.InstancedMesh;
+  private readonly groundClumps: THREE.InstancedMesh;
+  private readonly branchSnow: THREE.InstancedMesh;
+  private readonly branchPile: Float32Array;
+  private readonly branchCount: number;
   private readonly clump: Float32Array; // x, y, z, sx, sy, sz, cos, sin, delay
   private readonly clumpTotal: number;
 
@@ -193,7 +480,8 @@ export class WinterTransition {
     const random = seeded(20261106);
     const { scene, foliage, grass, litter } = parts;
 
-    parts.snowy.forEach((material) => patchSnowMaterial(material, this.snow));
+    parts.snowy.forEach((material) => patchSnowMaterial(material, this.snow, TREE_SNOW_RGB));
+    parts.groundSnowy.forEach((material) => patchSnowMaterial(material, this.snow, GROUND_SNOW_RGB));
 
     this.targets = {
       fog: new THREE.Color("#cdd9e2"),
@@ -234,49 +522,65 @@ export class WinterTransition {
       this.grassTarget[i * 3 + 2] = colour.b;
     }
 
-    // Snow clumps: dense drifts on the ground, plus small piles along the tops of branches.
-    const branchSpots = this.sampleBranchTops(parts.tree, random);
-    this.clumpTotal = GROUND_CLUMPS + branchSpots.length;
+    // Ground drifts stay low and wide. Snow on the pine is a separate tall blanket.
+    // The ground mesh is a darker white than the snow on the tree.
+    this.clumpTotal = GROUND_CLUMPS;
     this.clump = new Float32Array(this.clumpTotal * 9);
-    const palette = SNOW_TINTS.map((hex) => new THREE.Color(hex));
-    const clumpMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.95,
+    const groundPalette = GROUND_SNOW_TINTS.map((hex) => new THREE.Color(hex));
+    const clumpGeometry = snowClumpGeometry();
+    const groundClumpMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd4e0ea,
+      roughness: 0.97,
       metalness: 0,
-      emissive: 0xdce9f6,
-      emissiveIntensity: 0.1,
+      emissive: 0xc5d4e2,
+      emissiveIntensity: 0.05,
     });
-    this.clumps = new THREE.InstancedMesh(snowClumpGeometry(), clumpMaterial, this.clumpTotal);
-    for (let i = 0; i < this.clumpTotal; i += 1) {
+    this.groundClumps = new THREE.InstancedMesh(clumpGeometry, groundClumpMaterial, GROUND_CLUMPS);
+    for (let i = 0; i < GROUND_CLUMPS; i += 1) {
       const o = i * 9;
       const angle = random() * Math.PI * 2;
-      if (i < GROUND_CLUMPS) {
-        const distance = 1.1 + Math.pow(random(), 0.62) * 16.5;
-        const x = Math.cos(angle) * distance;
-        const z = Math.sin(angle) * distance;
-        // Broad low mounds make the rolling drifts; small tall puffs on top read as cotton-soft powder.
-        // Both stay low enough not to bury the monk or the puppy.
-        const mound = i < GROUND_MOUNDS;
-        const size = mound ? 0.8 + random() * 0.7 : 0.2 + Math.pow(random(), 1.5) * 0.3;
-        const sy = mound ? size * (0.08 + 0.05 * random()) : size * (0.45 + 0.25 * random());
-        this.clump.set(
-          [x, parts.groundHeight(x, z) + sy * 0.15, z, size * (0.9 + 0.5 * random()), sy, size * (0.9 + 0.5 * random()), Math.cos(angle), Math.sin(angle), CLUMP_MAX_DELAY * random()],
-          o,
-        );
-      } else {
-        const spot = branchSpots[i - GROUND_CLUMPS];
-        const size = 0.09 + random() * 0.12;
-        this.clump.set(
-          [spot.x, spot.y, spot.z, size * (1 + 0.5 * random()), size * 0.55, size * (1 + 0.5 * random()), Math.cos(angle), Math.sin(angle), CLUMP_MAX_DELAY * (0.3 + 0.7 * random())],
-          o,
-        );
-      }
-      this.clumps.setColorAt(i, palette[Math.floor(random() * palette.length)]);
+      const distance = 1.1 + Math.pow(random(), 0.62) * 16.5;
+      const x = Math.cos(angle) * distance;
+      const z = Math.sin(angle) * distance;
+      // Broad low mounds make the rolling drifts; small tall puffs on top read as cotton-soft powder.
+      // Both stay low enough not to bury the monk or the puppy.
+      const mound = i < GROUND_MOUNDS;
+      const size = mound ? 0.8 + random() * 0.7 : 0.2 + Math.pow(random(), 1.5) * 0.3;
+      const sy = mound ? size * (0.08 + 0.05 * random()) : size * (0.45 + 0.25 * random());
+      this.clump.set(
+        [x, parts.groundHeight(x, z) + sy * 0.15, z, size * (0.9 + 0.5 * random()), sy, size * (0.9 + 0.5 * random()), Math.cos(angle), Math.sin(angle), CLUMP_MAX_DELAY * random()],
+        o,
+      );
+      this.groundClumps.setColorAt(i, groundPalette[Math.floor(random() * groundPalette.length)]);
     }
-    this.clumps.count = 0;
-    this.clumps.frustumCulled = false;
-    this.clumps.receiveShadow = true;
-    scene.add(this.clumps);
+    this.groundClumps.count = 0;
+    this.groundClumps.frustumCulled = false;
+    this.groundClumps.receiveShadow = true;
+    if (this.groundClumps.instanceColor) this.groundClumps.instanceColor.needsUpdate = true;
+
+    const treePiles = collectTreeSnowPiles(parts.tree);
+    this.branchCount = treePiles.length;
+    this.branchPile = new Float32Array(Math.max(this.branchCount, 1) * 6);
+    const treePalette = TREE_SNOW_TINTS.map((hex) => new THREE.Color(hex));
+    const branchMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(TREE_SNOW_TINTS[0]),
+      roughness: 0.96,
+      metalness: 0,
+      emissive: 0xdce9f6,
+      emissiveIntensity: 0.12,
+    });
+    this.branchSnow = new THREE.InstancedMesh(snowClumpGeometry(), branchMaterial, Math.max(this.branchCount, 1));
+    for (let i = 0; i < this.branchCount; i += 1) {
+      const pile = treePiles[i];
+      this.branchPile.set([pile.x, pile.y, pile.z, pile.sx, pile.sy, pile.sz], i * 6);
+      this.branchSnow.setColorAt(i, treePalette[i % treePalette.length]);
+    }
+    this.writeBranchPiles(0);
+    this.branchSnow.count = 0;
+    this.branchSnow.frustumCulled = false;
+    this.branchSnow.receiveShadow = true;
+    if (this.branchSnow.instanceColor) this.branchSnow.instanceColor.needsUpdate = true;
+    scene.add(this.groundClumps, this.branchSnow);
 
     // Little snow caps on the monk and the puppy.
     const capMaterial = new THREE.MeshStandardMaterial({
@@ -341,40 +645,12 @@ export class WinterTransition {
     return this.startedAt !== null || this.progress >= 1;
   }
 
-  /** Small piles on the upward-facing top of every branch, root and trunk surface. */
-  private sampleBranchTops(tree: THREE.Object3D, random: () => number) {
-    const candidates: THREE.Vector3[] = [];
-    const point = new THREE.Vector3();
-    const normal = new THREE.Vector3();
-    tree.updateMatrixWorld(true);
-    tree.traverse((object) => {
-      const mesh = object as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const position = mesh.geometry.getAttribute("position");
-      const normals = mesh.geometry.getAttribute("normal");
-      if (!position || !normals) return;
-      for (let i = 0; i < position.count; i += 1) {
-        normal.fromBufferAttribute(normals, i).transformDirection(mesh.matrixWorld);
-        if (normal.y < 0.45) continue;
-        point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).addScaledVector(normal, 0.015);
-        candidates.push(point.clone());
-      }
-    });
-    const picked: THREE.Vector3[] = [];
-    const wanted = Math.min(BRANCH_CLUMPS, candidates.length);
-    for (let i = 0; i < wanted; i += 1) {
-      const j = i + Math.floor(random() * (candidates.length - i));
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-      picked.push(candidates[i]);
-    }
-    return picked;
-  }
-
   /** Begins the change at `now` (ms), or applies it immediately. */
   start(now: number, instant = false) {
     if (this.started) return;
     this.capture();
-    this.clumps.count = this.clumpTotal;
+    this.groundClumps.count = GROUND_CLUMPS;
+    this.branchSnow.count = this.branchCount;
     this.flakes.visible = true;
     this.caps.forEach(({ mesh }) => {
       mesh.visible = true;
@@ -416,6 +692,33 @@ export class WinterTransition {
       mountains: mountains.map((m) => ({ color: m.color.clone(), opacity: m.opacity })),
       grass: Float32Array.from(grass.instanceColor!.array as ArrayLike<number>),
     };
+  }
+
+  /** Branch mounds swell upward. Horizontal scale stays the footprint; vertical scale is the taller one. */
+  private writeBranchPiles(t: number) {
+    const ease = t <= 0 ? 0 : easeOut(clamp01((t - 0.12) / 0.88));
+    const array = this.branchSnow.instanceMatrix.array as Float32Array;
+    for (let i = 0; i < this.branchCount; i += 1) {
+      const p = i * 6;
+      const o = i * 16;
+      array[o] = this.branchPile[p + 3] * ease;
+      array[o + 1] = 0;
+      array[o + 2] = 0;
+      array[o + 3] = 0;
+      array[o + 4] = 0;
+      array[o + 5] = this.branchPile[p + 4] * ease;
+      array[o + 6] = 0;
+      array[o + 7] = 0;
+      array[o + 8] = 0;
+      array[o + 9] = 0;
+      array[o + 10] = this.branchPile[p + 5] * ease;
+      array[o + 11] = 0;
+      array[o + 12] = this.branchPile[p];
+      array[o + 13] = this.branchPile[p + 1];
+      array[o + 14] = this.branchPile[p + 2];
+      array[o + 15] = 1;
+    }
+    this.branchSnow.instanceMatrix.needsUpdate = true;
   }
 
   private apply(t: number) {
@@ -464,31 +767,35 @@ export class WinterTransition {
     grass.count = t >= 1 ? 0 : this.grassDelay.length;
 
     // Clumps swell up from nothing, ground first and branch piles a little later.
-    const array = this.clumps.instanceMatrix.array as Float32Array;
-    for (let i = 0; i < this.clumpTotal; i += 1) {
-      const c = i * 9;
-      const e = easeOut(clamp01((t - this.clump[c + 8]) / (1 - CLUMP_MAX_DELAY)));
-      const o = i * 16;
-      const cos = this.clump[c + 6];
-      const sin = this.clump[c + 7];
-      array[o] = this.clump[c + 3] * e * cos;
-      array[o + 1] = 0;
-      array[o + 2] = -this.clump[c + 3] * e * sin;
-      array[o + 3] = 0;
-      array[o + 4] = 0;
-      array[o + 5] = this.clump[c + 4] * e;
-      array[o + 6] = 0;
-      array[o + 7] = 0;
-      array[o + 8] = this.clump[c + 5] * e * sin;
-      array[o + 9] = 0;
-      array[o + 10] = this.clump[c + 5] * e * cos;
-      array[o + 11] = 0;
-      array[o + 12] = this.clump[c];
-      array[o + 13] = this.clump[c + 1];
-      array[o + 14] = this.clump[c + 2];
-      array[o + 15] = 1;
-    }
-    this.clumps.instanceMatrix.needsUpdate = true;
+    const writeClumps = (mesh: THREE.InstancedMesh, offset: number, count: number) => {
+      const array = mesh.instanceMatrix.array as Float32Array;
+      for (let i = 0; i < count; i += 1) {
+        const c = (offset + i) * 9;
+        const e = easeOut(clamp01((t - this.clump[c + 8]) / (1 - CLUMP_MAX_DELAY)));
+        const o = i * 16;
+        const cos = this.clump[c + 6];
+        const sin = this.clump[c + 7];
+        array[o] = this.clump[c + 3] * e * cos;
+        array[o + 1] = 0;
+        array[o + 2] = -this.clump[c + 3] * e * sin;
+        array[o + 3] = 0;
+        array[o + 4] = 0;
+        array[o + 5] = this.clump[c + 4] * e;
+        array[o + 6] = 0;
+        array[o + 7] = 0;
+        array[o + 8] = this.clump[c + 5] * e * sin;
+        array[o + 9] = 0;
+        array[o + 10] = this.clump[c + 5] * e * cos;
+        array[o + 11] = 0;
+        array[o + 12] = this.clump[c];
+        array[o + 13] = this.clump[c + 1];
+        array[o + 14] = this.clump[c + 2];
+        array[o + 15] = 1;
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    writeClumps(this.groundClumps, 0, GROUND_CLUMPS);
+    this.writeBranchPiles(t);
 
     const capEase = easeOut(clamp01((t - 0.35) / 0.65));
     this.caps.forEach(({ mesh, radii }) => mesh.scale.set(radii[0] * capEase, radii[1] * capEase, radii[2] * capEase));

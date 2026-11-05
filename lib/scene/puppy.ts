@@ -143,25 +143,39 @@ export function createPuppy(): Puppy {
     ears.push(pivot);
   }
 
-  // A curled, fluffy tail built from a chain of spheres that swell towards the tip.
+  // A Shiba-style tail: one thick, smooth swirl that rises from the rump and folds
+  // forward over the back, with a lighter end and a cream tip.
   const tail = new THREE.Group();
   tail.position.set(0, 0.56, -0.56);
   body.add(tail);
-  const tailCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0.1, -0.12),
-    new THREE.Vector3(0, 0.28, -0.18),
-    new THREE.Vector3(0, 0.42, -0.08),
-    new THREE.Vector3(0, 0.44, 0.05),
-  ]);
-  const tailSteps = 18;
-  for (let i = 0; i <= tailSteps; i += 1) {
-    const t = i / tailSteps;
-    const point = tailCurve.getPointAt(t);
-    const radius = 0.07 + t * 0.05;
-    const material = i >= tailSteps - 2 ? cream : i >= tailSteps - 6 ? coatLight : coat;
-    add(tail, sphere, material, [point.x, point.y, point.z], [radius, radius, radius]);
-  }
+  const curlRadius = 0.2;
+  const curlTube = 0.115;
+  const curlArc = Math.PI * 1.2;
+  const curl = new THREE.Group();
+  curl.position.set(0, curlRadius + 0.02, -0.05);
+  curl.rotation.y = Math.PI / 2 + 0.4;
+  // The group's local z is the world's left-right axis: widening it makes the tail fluffy from behind.
+  curl.scale.z = 1.5;
+  tail.add(curl);
+  // The torus starts at its bottom, where it meets the rump, and runs backwards, up and forwards.
+  add(curl, new THREE.TorusGeometry(curlRadius, curlTube, 20, 48, curlArc), coat, [0, 0, 0], [1, 1, 1], [0, 0, -Math.PI / 2]);
+  add(
+    curl,
+    new THREE.TorusGeometry(curlRadius, curlTube * 1.03, 20, 20, curlArc * 0.34),
+    coatLight,
+    [0, 0, 0],
+    [1, 1, 1],
+    [0, 0, curlArc * 0.66 - Math.PI / 2],
+  );
+  add(tail, sphere, coat, [0, 0.04, -0.02], [0.15, 0.14, 0.14]);
+  const tipAngle = curlArc - Math.PI / 2;
+  add(
+    curl,
+    sphere,
+    cream,
+    [curlRadius * Math.cos(tipAngle), curlRadius * Math.sin(tipAngle), 0],
+    [curlTube * 1.18, curlTube * 1.18, curlTube * 1.18],
+  );
 
   const legs: THREE.Group[] = [];
   const legSpots: [number, number][] = [

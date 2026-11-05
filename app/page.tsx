@@ -3,9 +3,11 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { AutumnTransition } from "@/lib/scene/autumn";
+import { TREE_TRUNK_RADIUS, stepDog, type DogMotion } from "@/lib/scene/dog-motion";
 import { LAPS_TO_UNLOCK, LapTracker } from "@/lib/scene/lap-tracker";
 import { createPuppy } from "@/lib/scene/puppy";
 import { VisitorSession, cachedAutumnUnlocked } from "@/lib/scene/visitor";
+import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
 // A procedural Chinese pine: dark fluted bark, wind-swept limbs, and sparse
 // needle pads in a quiet mountain atmosphere. All textures are made locally.
@@ -510,39 +512,6 @@ function createMonk() {
   return monk;
 }
 
-/** Flared base of the trunk, in world units. The puppy's body stays outside this. */
-const TREE_TRUNK_RADIUS = 2.15;
-
-/**
- * Step (x, z) by (vx, vz) without entering the trunk cylinder.
- * Motion into the bark slides along it instead.
- */
-function moveOutsideTrunk(x: number, z: number, vx: number, vz: number, clearance: number) {
-  const radial = Math.hypot(x, z);
-  const safe = Math.max(radial, 0.0001);
-  const nx = x / safe;
-  const nz = z / safe;
-  let svx = vx;
-  let svz = vz;
-  if (radial <= clearance + 0.08) {
-    const intoBark = svx * nx + svz * nz;
-    if (intoBark < 0) {
-      svx -= nx * intoBark;
-      svz -= nz * intoBark;
-    }
-  }
-  let nextX = x + svx;
-  let nextZ = z + svz;
-  const nextRadial = Math.hypot(nextX, nextZ);
-  const blocked = nextRadial < clearance;
-  if (blocked) {
-    const push = clearance / Math.max(nextRadial, 0.0001);
-    nextX *= push;
-    nextZ *= push;
-  }
-  return { x: nextX, z: nextZ, blocked };
-}
-
 function mountainGeometry(seed: number, radius: number, height: number) {
   const random = makeRandom(seed);
   const controlCount = 28;
@@ -603,7 +572,9 @@ export default function Home() {
       desiredRef.current.target.copy(aim);
       const pose = pair
         ? { azimuth: 0.35, polar: 1.3, distance: 9.5 }
-        : dogPreview.includes("front")
+        : dogPreview.includes("high")
+          ? { azimuth: -2.5, polar: 0.95, distance: 5.2 }
+          : dogPreview.includes("front")
           ? { azimuth: 0.4, polar: 1.22, distance: 4.6 }
           : dogPreview.includes("rear")
             ? { azimuth: 0.4 + Math.PI, polar: 1.28, distance: 5.2 }
@@ -615,6 +586,14 @@ export default function Home() {
       desiredRef.current.polar = pose.polar;
       desiredRef.current.distance = pose.distance;
     }
+
+    // Where a double-click returns to: the pose the page opened with.
+    const home = {
+      azimuth: desiredRef.current.azimuth,
+      polar: desiredRef.current.polar,
+      distance: desiredRef.current.distance,
+      target: desiredRef.current.target.clone(),
+    };
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const random = makeRandom(20261104);
@@ -1095,6 +1074,7 @@ export default function Home() {
     dog.rotation.y = 0.4;
     scene.add(dog);
     const dogTarget = new THREE.Vector3(dogX, 0, dogZ);
+    const dogMotion: DogMotion = { x: dogX, z: dogZ, detourSide: 1 };
     const dogShadow = new THREE.Mesh(
       new THREE.CircleGeometry(1, 24),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
@@ -1352,13 +1332,49 @@ export default function Home() {
       dragging = false;
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     };
+    // Zoom keeps the point under the cursor fixed. The ray is cast from the pose the
+    // camera is easing towards, so rapid wheel ticks stay accurate.
+    const zoomCamera = camera.clone();
+    const zoomRay = new THREE.Raycaster();
+    const zoomNdc = new THREE.Vector2();
+    const zoomTargets: THREE.Object3D[] = [ground, tree, foliage, monk, dog];
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      desiredRef.current.distance = THREE.MathUtils.clamp(
-        desiredRef.current.distance * (1 + event.deltaY * 0.001),
-        20,
-        58,
+      const rect = canvas.getBoundingClientRect();
+      zoomNdc.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
       );
+      const desired = desiredRef.current;
+      zoomCamera.aspect = camera.aspect;
+      zoomCamera.updateProjectionMatrix();
+      placeCamera(zoomCamera, desired);
+      zoomCamera.updateMatrixWorld(true);
+      zoomRay.setFromCamera(zoomNdc, zoomCamera);
+
+      // Anchor on whatever is under the cursor, but not absurdly far behind the view.
+      const maxDepth = desired.distance * fitScale * 1.6;
+      const hit = zoomRay.intersectObjects(zoomTargets, true)[0];
+      const depth = hit ? Math.min(hit.distance, maxDepth) : desired.distance * fitScale;
+      const anchor = zoomRay.ray.at(depth, new THREE.Vector3());
+
+      const zoomed = zoomAboutAnchor(
+        desired.distance,
+        desired.target,
+        zoomCamera.position,
+        anchor,
+        wheelToFactor(event.deltaY, event.deltaMode),
+      );
+      desired.distance = zoomed.distance;
+      desired.target.set(zoomed.target.x, zoomed.target.y, zoomed.target.z);
+    };
+    const onDoubleClick = () => {
+      const desired = desiredRef.current;
+      const turns = Math.round((viewRef.current.azimuth - home.azimuth) / (Math.PI * 2));
+      desired.azimuth = home.azimuth + turns * Math.PI * 2;
+      desired.polar = home.polar;
+      desired.distance = home.distance;
+      desired.target.copy(home.target);
     };
     const onPointerLeave = () => {
       pointerInside = false;
@@ -1369,8 +1385,22 @@ export default function Home() {
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("dblclick", onDoubleClick);
 
     let fitScale = 1;
+    const placeCamera = (
+      cam: THREE.PerspectiveCamera,
+      pose: { azimuth: number; polar: number; distance: number; target: THREE.Vector3 },
+    ) => {
+      const sinPolar = Math.sin(pose.polar);
+      const distance = pose.distance * fitScale;
+      cam.position.set(
+        pose.target.x + distance * sinPolar * Math.sin(pose.azimuth),
+        pose.target.y + distance * Math.cos(pose.polar),
+        pose.target.z + distance * sinPolar * Math.cos(pose.azimuth),
+      );
+      cam.lookAt(pose.target);
+    };
     const resize = () => {
       const width = wrap.clientWidth;
       const height = wrap.clientHeight;
@@ -1401,14 +1431,7 @@ export default function Home() {
       view.distance += (desired.distance - view.distance) * ease;
       view.target.lerp(desired.target, ease);
 
-      const sinPolar = Math.sin(view.polar);
-      const distance = view.distance * fitScale;
-      camera.position.set(
-        view.target.x + distance * sinPolar * Math.sin(view.azimuth),
-        view.target.y + distance * Math.cos(view.polar),
-        view.target.z + distance * sinPolar * Math.cos(view.azimuth),
-      );
-      camera.lookAt(view.target);
+      placeCamera(camera, view);
 
       // Speech bubble: visible only from the monk's front side, with a soft fade
       // so it never pops when you swing the camera around him.
@@ -1441,25 +1464,18 @@ export default function Home() {
         }
       }
 
-      const toTargetX = dogTarget.x - dog.position.x;
-      const toTargetZ = dogTarget.z - dog.position.z;
-      const targetDistance = Math.hypot(toTargetX, toTargetZ);
-      const dogMoving = targetDistance > 0.08;
+      // The dog walks round the trunk towards the cursor and runs when far behind it.
+      dogMotion.x = dog.position.x;
+      dogMotion.z = dog.position.z;
+      const walk = stepDog(dogMotion, dogTarget.x, dogTarget.z, delta, trunkClearance, reduceMotion);
+      const dogMoving = walk.moving;
       if (dogMoving) {
-        const step = Math.min((reduceMotion ? 16 : 3.4) * delta, targetDistance);
-        const moved = moveOutsideTrunk(
-          dog.position.x,
-          dog.position.z,
-          (toTargetX / targetDistance) * step,
-          (toTargetZ / targetDistance) * step,
-          trunkClearance,
-        );
-        dog.position.x = moved.x;
-        dog.position.z = moved.z;
-        const yaw = Math.atan2(toTargetX, toTargetZ);
+        dog.position.x = dogMotion.x;
+        dog.position.z = dogMotion.z;
+        const yaw = Math.atan2(walk.headX, walk.headZ);
         const turn = Math.atan2(Math.sin(yaw - dog.rotation.y), Math.cos(yaw - dog.rotation.y));
         dog.rotation.y += turn * (reduceMotion ? 1 : Math.min(1, delta * 8));
-        if (!moved.blocked) walkPhase += step * 8;
+        if (!walk.blocked) walkPhase += walk.step * 8;
       }
       dog.position.y = terrainHeight(dog.position.x, dog.position.z);
       dogShadow.position.set(dog.position.x, dog.position.y + 0.025, dog.position.z);
@@ -1526,6 +1542,7 @@ export default function Home() {
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("dblclick", onDoubleClick);
 
       const geometries = new Set<THREE.BufferGeometry>();
       const materials = new Set<THREE.Material>();

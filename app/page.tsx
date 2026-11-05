@@ -2,6 +2,10 @@
 
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { AutumnTransition } from "@/lib/scene/autumn";
+import { LAPS_TO_UNLOCK, LapTracker } from "@/lib/scene/lap-tracker";
+import { createPuppy } from "@/lib/scene/puppy";
+import { VisitorSession, cachedAutumnUnlocked } from "@/lib/scene/visitor";
 
 // A procedural Chinese pine: dark fluted bark, wind-swept limbs, and sparse
 // needle pads in a quiet mountain atmosphere. All textures are made locally.
@@ -539,174 +543,6 @@ function moveOutsideTrunk(x: number, z: number, vx: number, vz: number, clearanc
   return { x: nextX, z: nextZ, blocked };
 }
 
-/**
- * A little golden retriever built from soft volumes.
- * Nose points along local +Z, which is the heading `rotation.y = atan2(dx, dz)` already uses.
- * Feet sit on y = 0. The tail pivot is at the rump and extends along local -Z.
- */
-function createPuppy() {
-  const dog = new THREE.Group();
-  const body = new THREE.Group();
-  dog.add(body);
-
-  const coat = new THREE.MeshStandardMaterial({ color: 0xdfa34a, roughness: 0.82, metalness: 0 });
-  const coatLight = new THREE.MeshStandardMaterial({ color: 0xe9b85f, roughness: 0.82, metalness: 0 });
-  const cream = new THREE.MeshStandardMaterial({ color: 0xf6dfb2, roughness: 0.78, metalness: 0 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2b1a12, roughness: 0.5, metalness: 0 });
-  const gloss = new THREE.MeshBasicMaterial({ color: 0xfff6e8 });
-
-  const sphere = new THREE.SphereGeometry(1, 32, 20);
-  const legGeo = new THREE.CapsuleGeometry(0.065, 0.18, 4, 12);
-
-  const add = (
-    parent: THREE.Object3D,
-    geometry: THREE.BufferGeometry,
-    material: THREE.Material,
-    position: [number, number, number],
-    scale: [number, number, number] = [1, 1, 1],
-    rotation: [number, number, number] = [0, 0, 0],
-  ) => {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(...position);
-    mesh.scale.set(...scale);
-    mesh.rotation.set(...rotation);
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    parent.add(mesh);
-    return mesh;
-  };
-
-  // A compact torso and one continuous coat colour keep the silhouette clean.
-  add(body, sphere, coat, [0, 0.43, -0.04], [0.35, 0.27, 0.45]);
-  add(body, sphere, coat, [0, 0.47, 0.25], [0.31, 0.29, 0.28]);
-  add(body, sphere, coat, [0, 0.43, -0.34], [0.32, 0.27, 0.28]);
-  add(body, sphere, cream, [0, 0.37, 0.39], [0.2, 0.2, 0.12]);
-
-  const head = new THREE.Group();
-  head.position.set(0, 0.75, 0.55);
-  head.rotation.x = 0.04;
-  body.add(head);
-  add(head, sphere, coat, [0, 0.03, 0], [0.33, 0.29, 0.29]);
-  add(head, sphere, coatLight, [-0.15, -0.055, 0.15], [0.17, 0.15, 0.16]);
-  add(head, sphere, coatLight, [0.15, -0.055, 0.15], [0.17, 0.15, 0.16]);
-  add(head, sphere, cream, [0, -0.09, 0.26], [0.17, 0.11, 0.15]);
-  add(head, sphere, dark, [0, -0.055, 0.395], [0.065, 0.05, 0.045]);
-
-  add(head, sphere, dark, [-0.135, 0.075, 0.245], [0.043, 0.052, 0.032]);
-  add(head, sphere, dark, [0.135, 0.075, 0.245], [0.043, 0.052, 0.032]);
-  add(head, sphere, gloss, [-0.122, 0.095, 0.274], [0.012, 0.012, 0.009]);
-  add(head, sphere, gloss, [0.148, 0.095, 0.274], [0.012, 0.012, 0.009]);
-  add(head, sphere, cream, [-0.135, 0.165, 0.21], [0.055, 0.022, 0.025]);
-  add(head, sphere, cream, [0.135, 0.165, 0.21], [0.055, 0.022, 0.025]);
-
-  const addMouthLine = (curve: THREE.QuadraticBezierCurve3) => {
-    add(head, new THREE.TubeGeometry(curve, 12, 0.008, 6, false), dark, [0, 0, 0]);
-  };
-  addMouthLine(
-    new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(0, -0.09, 0.405),
-      new THREE.Vector3(0, -0.125, 0.4),
-      new THREE.Vector3(0, -0.145, 0.385),
-    ),
-  );
-  addMouthLine(
-    new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(0, -0.145, 0.385),
-      new THREE.Vector3(-0.05, -0.18, 0.37),
-      new THREE.Vector3(-0.095, -0.145, 0.335),
-    ),
-  );
-  addMouthLine(
-    new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(0, -0.145, 0.385),
-      new THREE.Vector3(0.05, -0.18, 0.37),
-      new THREE.Vector3(0.095, -0.145, 0.335),
-    ),
-  );
-
-  const addEar = (side: number) => {
-    const ear = new THREE.Group();
-    ear.position.set(side * 0.28, 0.08, -0.02);
-    ear.rotation.z = side * 0.12;
-    ear.rotation.x = 0.1;
-    head.add(ear);
-    add(ear, sphere, coat, [side * 0.03, -0.16, 0.025], [0.115, 0.29, 0.105]);
-  };
-  addEar(-1);
-  addEar(1);
-
-  // Fine swept cones around a continuous core create fur instead of segments.
-  const tail = new THREE.Group();
-  tail.position.set(0, 0.48, -0.48);
-  body.add(tail);
-  const tailCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0.12, -0.2),
-    new THREE.Vector3(0, 0.35, -0.28),
-    new THREE.Vector3(0, 0.5, -0.2),
-    new THREE.Vector3(0, 0.48, -0.04),
-  ]);
-  add(tail, new THREE.TubeGeometry(tailCurve, 40, 0.068, 12, false), coat, [0, 0, 0]);
-
-  const tailRandom = makeRandom(4481);
-  const furCount = 84;
-  const tailFur = new THREE.InstancedMesh(new THREE.ConeGeometry(0.024, 0.14, 5), coat, furCount);
-  const furDummy = new THREE.Object3D();
-  const furUp = new THREE.Vector3(0, 1, 0);
-  const sideAxis = new THREE.Vector3(1, 0, 0);
-  for (let i = 0; i < furCount; i += 1) {
-    const t = 0.08 + ((i % 14) / 13) * 0.86;
-    const ring = Math.floor(i / 14);
-    const angle = (ring / 6) * Math.PI * 2 + (tailRandom() - 0.5) * 0.35;
-    const point = tailCurve.getPointAt(t);
-    const tangent = tailCurve.getTangentAt(t).normalize();
-    const normal = new THREE.Vector3().crossVectors(tangent, sideAxis).normalize();
-    const radial = sideAxis
-      .clone()
-      .multiplyScalar(Math.cos(angle))
-      .addScaledVector(normal, Math.sin(angle))
-      .normalize();
-    const furDirection = radial.clone().multiplyScalar(0.78).addScaledVector(tangent, 0.55).normalize();
-    const scale = 0.65 + tailRandom() * 0.7;
-    furDummy.position.copy(point).addScaledVector(radial, 0.065).addScaledVector(furDirection, 0.04);
-    furDummy.quaternion.setFromUnitVectors(furUp, furDirection);
-    furDummy.scale.setScalar(scale);
-    furDummy.updateMatrix();
-    tailFur.setMatrixAt(i, furDummy.matrix);
-  }
-  tailFur.instanceMatrix.needsUpdate = true;
-  tailFur.receiveShadow = true;
-  tailFur.frustumCulled = false;
-  tail.add(tailFur);
-
-  const legs: THREE.Group[] = [];
-  (
-    [
-      [-0.18, 0.26],
-      [0.18, 0.26],
-      [-0.19, -0.28],
-      [0.19, -0.28],
-    ] as [number, number][]
-  ).forEach(([x, z], index) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.34, z);
-    body.add(pivot);
-    const upper = new THREE.Mesh(legGeo, coat);
-    upper.position.y = -0.13;
-    upper.castShadow = false;
-    upper.receiveShadow = true;
-    pivot.add(upper);
-    add(pivot, sphere, cream, [0, -0.29, 0.055], [0.085, 0.055, 0.115]);
-    if (index >= 2) add(pivot, sphere, coat, [0, -0.04, -0.035], [0.095, 0.12, 0.075]);
-    legs.push(pivot);
-  });
-
-  const scale = 1.2;
-  dog.scale.setScalar(scale);
-  // Keep the established collision volume and walking rig unchanged.
-  return { dog, body, tail, legs, radius: 1.05 * scale };
-}
-
 function mountainGeometry(seed: number, radius: number, height: number) {
   const random = makeRandom(seed);
   const controlCount = 28;
@@ -759,15 +595,19 @@ export default function Home() {
     if (!canvas || !wrap) return;
 
     const dogPreview = window.location.hash;
-    if (dogPreview.startsWith("#dog")) {
+    if (dogPreview.startsWith("#dog") || dogPreview.startsWith("#pair")) {
+      const pair = dogPreview.startsWith("#pair");
       const aim = viewRef.current.target;
-      aim.set(1.15, 0.65, 6.4);
+      if (pair) aim.set(1.9, 1.15, 5);
+      else aim.set(1.15, 0.65, 6.4);
       desiredRef.current.target.copy(aim);
-      const pose = dogPreview.includes("front")
-        ? { azimuth: 0.4, polar: 1.22, distance: 4.6 }
-        : dogPreview.includes("rear")
-          ? { azimuth: 0.4 + Math.PI, polar: 1.28, distance: 5.2 }
-          : { azimuth: -1.15, polar: 1.18, distance: 4.8 };
+      const pose = pair
+        ? { azimuth: 0.35, polar: 1.3, distance: 9.5 }
+        : dogPreview.includes("front")
+          ? { azimuth: 0.4, polar: 1.22, distance: 4.6 }
+          : dogPreview.includes("rear")
+            ? { azimuth: 0.4 + Math.PI, polar: 1.28, distance: 5.2 }
+            : { azimuth: -1.15, polar: 1.18, distance: 4.8 };
       viewRef.current.azimuth = pose.azimuth;
       viewRef.current.polar = pose.polar;
       viewRef.current.distance = pose.distance;
@@ -793,7 +633,8 @@ export default function Home() {
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 220);
 
-    scene.add(new THREE.HemisphereLight(0xb9d0cd, 0x101912, 1.25));
+    const hemisphere = new THREE.HemisphereLight(0xb9d0cd, 0x101912, 1.25);
+    scene.add(hemisphere);
     scene.add(new THREE.AmbientLight(0x54706a, 0.34));
 
     const key = new THREE.DirectionalLight(0xffe1b3, 3.1);
@@ -1265,6 +1106,27 @@ export default function Home() {
     const dogRay = new THREE.Raycaster();
     let walkPhase = 0;
 
+    // Three full laps around the tree turn the scene to autumn. Progress is
+    // recorded per visitor uuid; the browser and IP are stored with it for logging.
+    const laps = new LapTracker();
+    const autumn = new AutumnTransition(foliage, grass, { scene, renderer, hemisphere, key, rim });
+    const visitor = new VisitorSession();
+    const abortVisitor = new AbortController();
+    if (cachedAutumnUnlocked()) {
+      laps.restoreCompleted();
+      autumn.start(0, true);
+    }
+    void visitor.load(abortVisitor.signal).then((status) => {
+      if (!status) return;
+      if (status.autumn) {
+        laps.restoreCompleted();
+        autumn.start(performance.now(), reduceMotion);
+      } else if (laps.completed) {
+        // The browser remembered autumn but the server did not, so heal the record.
+        visitor.report({ laps: LAPS_TO_UNLOCK, direction: null, completed: true });
+      }
+    });
+
     // WebGL speech bubble. Random Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
     // Hidden until the face is ready so the first paint is not Latin.
     const BUBBLE_WORLD_HEIGHT = 1.76;
@@ -1602,9 +1464,23 @@ export default function Home() {
       dog.position.y = terrainHeight(dog.position.x, dog.position.z);
       dogShadow.position.set(dog.position.x, dog.position.y + 0.025, dog.position.z);
       dogShadow.rotation.y = dog.rotation.y;
+
+      const lapState = laps.update(dog.position.x, dog.position.z);
+      if (lapState.newFullLap !== null && !lapState.justCompleted) {
+        visitor.report({ laps: lapState.newFullLap, direction: lapState.direction });
+      }
+      if (lapState.justCompleted) {
+        visitor.report({ laps: LAPS_TO_UNLOCK, direction: lapState.direction, completed: true });
+        autumn.start(now, reduceMotion);
+      }
+      autumn.update(now);
+
       if (dogCoordsRef.current) {
         const formatAxis = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-        dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}`;
+        const lapText = lapState.completed
+          ? "autumn unlocked"
+          : `laps ${lapState.direction === "ccw" ? "↺" : "↻"} ${lapState.laps.toFixed(1)}/${LAPS_TO_UNLOCK}`;
+        dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}`;
       }
 
       const gait = dogMoving && !reduceMotion ? 1 : 0;
@@ -1614,6 +1490,14 @@ export default function Home() {
       });
       const bob = gait * Math.abs(Math.sin(walkPhase)) * 0.04;
       puppy.body.position.y += (bob - puppy.body.position.y) * 0.4;
+      puppy.head.rotation.z += (Math.sin(walkPhase) * 0.05 * gait - puppy.head.rotation.z) * 0.3;
+      puppy.ears.forEach((ear, index) => {
+        const side = index === 0 ? -1 : 1;
+        const flop = Math.sin(walkPhase * 2 + index) * 0.12 * gait;
+        ear.rotation.z += (side * (0.42 + flop) - ear.rotation.z) * 0.35;
+      });
+      const tongueTarget = gait > 0 ? 1 : 0.0001;
+      puppy.tongue.scale.setScalar(puppy.tongue.scale.x + (tongueTarget - puppy.tongue.scale.x) * 0.25);
       puppy.tail.rotation.x = 0.22 + Math.sin(now * 0.006) * 0.05;
       puppy.tail.rotation.y = Math.sin(now * (dogMoving ? 0.013 : 0.007)) * (dogMoving ? 0.7 : 0.28);
       puppy.tail.rotation.z = 0;
@@ -1631,6 +1515,7 @@ export default function Home() {
 
     return () => {
       cancelled = true;
+      abortVisitor.abort();
       cancelAnimationFrame(frame);
       window.clearTimeout(chatterTimer);
       bubbleTexture.texture.dispose();
@@ -1670,7 +1555,7 @@ export default function Home() {
           ref={dogCoordsRef}
           className="pointer-events-none absolute left-4 top-4 z-10 m-0 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4]"
         >
-          from tree   x +0.00   z +0.00
+          from tree   x +0.00   z +0.00   laps ↻ 0.0/3
         </p>
         <div
           className="pointer-events-none absolute inset-0"

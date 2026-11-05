@@ -17,6 +17,10 @@ export interface SceneVisitor {
   /** How many times autumn has been earned, once per page view that completed three laps. */
   autumnUnlocks: number;
   lastAutumnAt?: string;
+  /** When winter was first earned, and how many times since. */
+  winterUnlockedAt?: string;
+  winterUnlocks: number;
+  lastWinterAt?: string;
 }
 
 interface SceneStore {
@@ -88,10 +92,14 @@ export interface VisitorRequestMeta {
   userAgent: string;
 }
 
+export type UnlockStage = "autumn" | "winter";
+
 export interface ProgressUpdate {
   laps?: number;
   direction?: "cw" | "ccw" | null;
   completed?: boolean;
+  /** Which stage the three laps unlocked. Clients that do not send one mean autumn. */
+  stage?: UnlockStage;
 }
 
 /**
@@ -118,10 +126,12 @@ export function upsertVisitor(
     laps: 0,
     direction: null,
     autumnUnlocks: 0,
+    winterUnlocks: 0,
   };
 
   // Records written before unlocks were counted.
   if (typeof visitor.autumnUnlocks !== "number") visitor.autumnUnlocks = visitor.autumnUnlockedAt ? 1 : 0;
+  if (typeof visitor.winterUnlocks !== "number") visitor.winterUnlocks = visitor.winterUnlockedAt ? 1 : 0;
 
   visitor.lastSeenAt = now;
   visitor.ip = meta.ip || visitor.ip;
@@ -137,9 +147,15 @@ export function upsertVisitor(
   if (update.direction === "cw" || update.direction === "ccw") visitor.direction = update.direction;
   // The scene always loads green, so each page view that finishes three laps is a new unlock.
   if (update.completed && reportedLaps >= 3) {
-    visitor.autumnUnlockedAt = visitor.autumnUnlockedAt ?? now;
-    visitor.lastAutumnAt = now;
-    visitor.autumnUnlocks += 1;
+    if (update.stage === "winter") {
+      visitor.winterUnlockedAt = visitor.winterUnlockedAt ?? now;
+      visitor.lastWinterAt = now;
+      visitor.winterUnlocks += 1;
+    } else {
+      visitor.autumnUnlockedAt = visitor.autumnUnlockedAt ?? now;
+      visitor.lastAutumnAt = now;
+      visitor.autumnUnlocks += 1;
+    }
   }
 
   store.visitors[id] = visitor;

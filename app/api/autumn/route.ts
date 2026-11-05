@@ -31,12 +31,16 @@ function requestMeta(req: NextRequest) {
   return { ip: getClientIp(req), userAgent: (req.headers.get("user-agent") || "").slice(0, 400) };
 }
 
-/** `autumn` and `unlocks` are memory only: the scene itself always loads green. */
+/** `autumn`/`winter` and the counts are memory only: the scene itself always loads green. */
 function payload(visitor: SceneVisitor) {
+  const unlocks = visitor.autumnUnlocks || (visitor.autumnUnlockedAt ? 1 : 0);
+  const winterUnlocks = visitor.winterUnlocks || (visitor.winterUnlockedAt ? 1 : 0);
   return {
     id: visitor.id,
-    autumn: visitor.autumnUnlocks > 0 || Boolean(visitor.autumnUnlockedAt),
-    unlocks: visitor.autumnUnlocks || (visitor.autumnUnlockedAt ? 1 : 0),
+    autumn: unlocks > 0,
+    unlocks,
+    winter: winterUnlocks > 0,
+    winterUnlocks,
     laps: visitor.laps,
   };
 }
@@ -75,7 +79,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** Records lap progress and, once three laps are done in a page view, counts an autumn unlock. */
+/** Records lap progress and, once three laps are done in a page view, counts a stage unlock. */
 export async function POST(req: NextRequest) {
   try {
     const meta = requestMeta(req);
@@ -98,6 +102,7 @@ export async function POST(req: NextRequest) {
       laps: typeof body.laps === "number" ? body.laps : undefined,
       direction: body.direction === "cw" || body.direction === "ccw" ? body.direction : undefined,
       completed: body.completed === true,
+      stage: body.stage === "winter" ? "winter" : body.stage === "autumn" ? "autumn" : undefined,
     };
     const visitor = upsertVisitor(id, meta, update);
     return withCookie(req, NextResponse.json(payload(visitor)), id);

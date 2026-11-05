@@ -4,9 +4,11 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { AutumnTransition } from "@/lib/scene/autumn";
 import { TREE_TRUNK_RADIUS, stepDog, type DogMotion } from "@/lib/scene/dog-motion";
-import { LAPS_TO_UNLOCK, LapTracker } from "@/lib/scene/lap-tracker";
+import { LAPS_TO_UNLOCK } from "@/lib/scene/lap-tracker";
 import { createPuppy, easeTongue } from "@/lib/scene/puppy";
+import { SceneStages } from "@/lib/scene/stages";
 import { VisitorSession } from "@/lib/scene/visitor";
+import { WinterTransition } from "@/lib/scene/winter";
 import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
 // A procedural Chinese pine: dark fluted bark, wind-swept limbs, and sparse
@@ -639,22 +641,22 @@ export default function Home() {
     scene.add(fill);
 
     // Concentric shan-shui ridgelines remain present through a complete orbit.
+    const mountainMaterials: THREE.MeshBasicMaterial[] = [];
     [
       { seed: 31, radius: 108, height: 30, y: -3, color: "#425d61", opacity: 0.24 },
       { seed: 47, radius: 86, height: 22, y: -2, color: "#30494d", opacity: 0.32 },
       { seed: 63, radius: 68, height: 15, y: -1, color: "#223a3d", opacity: 0.38 },
     ].forEach((layer) => {
-      const mountain = new THREE.Mesh(
-        mountainGeometry(layer.seed, layer.radius, layer.height),
-        new THREE.MeshBasicMaterial({
-          color: layer.color,
-          transparent: true,
-          opacity: layer.opacity,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          fog: false,
-        }),
-      );
+      const material = new THREE.MeshBasicMaterial({
+        color: layer.color,
+        transparent: true,
+        opacity: layer.opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+      });
+      mountainMaterials.push(material);
+      const mountain = new THREE.Mesh(mountainGeometry(layer.seed, layer.radius, layer.height), material);
       mountain.position.y = layer.y;
       scene.add(mountain);
     });
@@ -670,10 +672,13 @@ export default function Home() {
       groundPositions.setY(i, terrainHeight(groundPositions.getX(i), groundPositions.getZ(i)));
     }
     groundGeometry.computeVertexNormals();
-    const ground = new THREE.Mesh(
-      groundGeometry,
-      new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x879184, roughness: 1, metalness: 0 }),
-    );
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      map: groundTexture,
+      color: 0x879184,
+      roughness: 1,
+      metalness: 0,
+    });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.receiveShadow = true;
     scene.add(ground);
 
@@ -1086,17 +1091,20 @@ export default function Home() {
     const dogRay = new THREE.Raycaster();
     let walkPhase = 0;
 
-    // Three full laps around the tree turn the scene to autumn for the rest of this
-    // page view. Every load starts green with a fresh lap count; the server only
-    // remembers, per visitor uuid, how many times autumn has been earned (plus the
-    // browser and IP, for logging).
-    const laps = new LapTracker();
+    // Three full laps round the tree move the scene on one stage for the rest of this
+    // page view: green, then autumn, then winter. Every load starts green with a fresh
+    // lap count; the server only remembers, per visitor uuid, how many times each stage
+    // has been earned (plus the browser and IP, for logging).
+    const stages = new SceneStages();
     const autumn = new AutumnTransition(foliage, grass, { scene, renderer, hemisphere, key, rim });
     const visitor = new VisitorSession();
     const abortVisitor = new AbortController();
-    let earnedBefore = 0;
+    let earnedAutumn = 0;
+    let earnedWinter = 0;
     void visitor.load(abortVisitor.signal).then((status) => {
-      if (status) earnedBefore = status.unlocks;
+      if (!status) return;
+      earnedAutumn = Math.max(earnedAutumn, status.unlocks);
+      earnedWinter = Math.max(earnedWinter, status.winterUnlocks);
     });
 
     // WebGL speech bubble. Random Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
@@ -1201,6 +1209,38 @@ export default function Home() {
     litter.instanceMatrix.needsUpdate = true;
     litter.receiveShadow = true;
     scene.add(litter);
+
+    // Winter needs the finished scene: the crown, grass, litter and the surfaces snow settles on.
+    const winter = new WinterTransition({
+      scene,
+      renderer,
+      hemisphere,
+      key,
+      rim,
+      fill,
+      tree,
+      foliage,
+      grass,
+      litter,
+      snowy: [groundMaterial, barkMaterial, stoneMaterial],
+      mountains: mountainMaterials,
+      groundHeight: terrainHeight,
+      caps: [
+        { parent: monk, position: [0, 2.47, 0.03], radii: [0.4, 0.17, 0.38] },
+        { parent: puppy.head, position: [0, 0.33, -0.03], radii: [0.25, 0.085, 0.22] },
+        { parent: puppy.body, position: [0, 0.74, -0.17], radii: [0.27, 0.075, 0.34] },
+      ],
+    });
+    textures.push(winter.flakeTexture);
+
+    // #autumn and #winter jump straight to a stage so each look can be checked quickly.
+    if (window.location.hash.includes("winter")) {
+      stages.jumpTo("winter");
+      winter.start(0, true);
+    } else if (window.location.hash.includes("autumn")) {
+      stages.jumpTo("autumn");
+      autumn.start(0, true);
+    }
 
     const mistTexture = radialTexture("rgba(255,255,255,0.8)", "rgba(255,255,255,0)");
     textures.push(mistTexture);
@@ -1473,24 +1513,38 @@ export default function Home() {
       dogShadow.position.set(dog.position.x, dog.position.y + 0.025, dog.position.z);
       dogShadow.rotation.y = dog.rotation.y;
 
-      const lapState = laps.update(dog.position.x, dog.position.z);
-      if (lapState.newFullLap !== null && !lapState.justCompleted) {
-        visitor.report({ laps: lapState.newFullLap, direction: lapState.direction });
+      const progress = stages.update(dog.position.x, dog.position.z);
+      const lap = progress.lap;
+      if (lap.newFullLap !== null && !lap.justCompleted) {
+        visitor.report({ laps: lap.newFullLap, direction: lap.direction });
       }
-      if (lapState.justCompleted) {
-        visitor.report({ laps: LAPS_TO_UNLOCK, direction: lapState.direction, completed: true });
-        earnedBefore += 1;
+      if (progress.advancedTo === "autumn") {
+        visitor.report({ laps: LAPS_TO_UNLOCK, direction: lap.direction, completed: true, stage: "autumn" });
+        earnedAutumn += 1;
         autumn.start(now, reduceMotion);
+      } else if (progress.advancedTo === "winter") {
+        visitor.report({ laps: LAPS_TO_UNLOCK, direction: lap.direction, completed: true, stage: "winter" });
+        earnedWinter += 1;
+        autumn.finish();
+        winter.start(now, reduceMotion);
       }
       autumn.update(now);
+      winter.update(now, reduceMotion);
 
       if (dogCoordsRef.current) {
         const formatAxis = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-        const earned = earnedBefore > 0 ? `   earned x${earnedBefore}` : "";
-        const lapText = lapState.completed
-          ? `autumn unlocked${earned}`
-          : `laps ${lapState.direction === "ccw" ? "↺" : "↻"} ${lapState.laps.toFixed(1)}/${LAPS_TO_UNLOCK}${earned}`;
-        dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}`;
+        const remembered = [
+          earnedAutumn > 0 ? `autumn x${earnedAutumn}` : "",
+          earnedWinter > 0 ? `winter x${earnedWinter}` : "",
+        ].filter(Boolean);
+        const earned = remembered.length > 0 ? `   earned ${remembered.join(" ")}` : "";
+        const arrow = lap.direction === "ccw" ? "↺" : "↻";
+        const shownLaps = progress.advancedTo ? 0 : lap.laps;
+        const lapText =
+          progress.next === null
+            ? "winter"
+            : `${progress.stage === "autumn" ? "autumn   " : ""}laps ${arrow} ${shownLaps.toFixed(1)}/${LAPS_TO_UNLOCK} → ${progress.next}`;
+        dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}${earned}`;
       }
 
       const gait = dogMoving && !reduceMotion ? 1 : 0;
@@ -1565,7 +1619,7 @@ export default function Home() {
           ref={dogCoordsRef}
           className="pointer-events-none absolute left-4 top-4 z-10 m-0 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4]"
         >
-          from tree   x +0.00   z +0.00   laps ↻ 0.0/3
+          from tree   x +0.00   z +0.00   laps ↻ 0.0/3 → autumn
         </p>
         <div
           className="pointer-events-none absolute inset-0"

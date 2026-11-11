@@ -1,7 +1,10 @@
 const FULL_TURN = Math.PI * 2;
 
-/** Full turns around the tree that unlock the autumn scene. */
-export const LAPS_TO_UNLOCK = 3;
+/**
+ * Turns around the tree that unlock the next stage.
+ * Temporarily half a lap so the stages can be reached quickly. Restore this to 3.
+ */
+export const LAPS_TO_UNLOCK = 0.5;
 
 export type LapDirection = "cw" | "ccw";
 

@@ -197,8 +197,8 @@ export class WinterTransition {
 
   private readonly groundClumps: THREE.InstancedMesh;
   private readonly branchSnow: THREE.Mesh;
-  private readonly branchFinalY: Float32Array;
-  private readonly branchSink: Float32Array;
+  private branchFinalY: Float32Array;
+  private branchSink: Float32Array;
   private branchEase = -1;
   private readonly clump: Float32Array; // x, y, z, sx, sy, sz, cos, sin, delay
   private readonly clumpTotal: number;
@@ -366,6 +366,9 @@ export class WinterTransition {
     this.flakes = new THREE.Points(flakeGeometry, flakeMaterial);
     this.flakes.frustumCulled = false;
     this.flakes.visible = false;
+    // The moon disc is transparent at renderOrder 1 so it can cover the
+    // mountain cards. Flakes in front of it have to draw after that.
+    this.flakes.renderOrder = 2;
     scene.add(this.flakes);
   }
 
@@ -375,6 +378,17 @@ export class WinterTransition {
 
   get started() {
     return this.startedAt !== null || this.progress >= 1;
+  }
+
+  /** Drop snow that belonged to a limb which has been cut off the tree. */
+  refreshBranchSnow() {
+    const next = buildTreeSnowGeometry(this.parts.tree);
+    this.branchSnow.geometry.dispose();
+    this.branchSnow.geometry = next.geometry;
+    this.branchFinalY = next.finalY;
+    this.branchSink = next.sink;
+    this.branchEase = -1;
+    this.writeBranchSnow(this.progress >= 1 ? 1 : this.progress);
   }
 
   /** Begins the change at `now` (ms), or applies it immediately. */

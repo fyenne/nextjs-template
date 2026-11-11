@@ -752,11 +752,13 @@ export default function Home() {
     const tree = new THREE.Group();
     scene.add(tree);
 
+    const limbs: THREE.Mesh[] = [];
     const addTube = (
       curve: THREE.Curve<THREE.Vector3>,
       radiusStart: number,
       radiusEnd: number,
       options?: TubeOptions,
+      kind: "trunk" | "root" | "branch" = "branch",
     ) => {
       const mesh = new THREE.Mesh(taperedTube(curve, radiusStart, radiusEnd, options), barkMaterial);
       mesh.castShadow = true;
@@ -766,8 +768,17 @@ export default function Home() {
         segments: options?.segments ?? 32,
         radial: options?.radial ?? 10,
       };
+      mesh.userData.kind = kind;
+      if (kind === "branch") limbs.push(mesh);
       tree.add(mesh);
       return mesh;
+    };
+    // Twigs and forks are their own meshes. Cutting a limb takes the ones that grew on it.
+    const offshoots = new Map<THREE.Mesh, THREE.Mesh[]>();
+    const rememberOffshoot = (limb: THREE.Mesh, child: THREE.Mesh) => {
+      const list = offshoots.get(limb);
+      if (list) list.push(child);
+      else offshoots.set(limb, [child]);
     };
 
     const trunkCurve = new THREE.CatmullRomCurve3(
@@ -790,7 +801,7 @@ export default function Home() {
       "catmullrom",
       0.48,
     );
-    addTube(trunkCurve, 1.26, 0.12, { segments: 128, radial: 24, wrinkle: 0.23, flare: 0.72, moss: 0.82 });
+    addTube(trunkCurve, 1.26, 0.12, { segments: 128, radial: 24, wrinkle: 0.23, flare: 0.72, moss: 0.82 }, "trunk");
 
     // Exposed roots radiate unevenly and disappear into the dark forest floor.
     for (let i = 0; i < 9; i += 1) {
@@ -813,7 +824,7 @@ export default function Home() {
         wrinkle: 0.2,
         flare: 0.28,
         moss: 0.95,
-      });
+      }, "root");
     }
 
     type Placement = { matrix: THREE.Matrix4; color: THREE.Color };
@@ -943,7 +954,7 @@ export default function Home() {
       }
 
       const curve = new THREE.CatmullRomCurve3([start, p1, p2, p3, tip], false, "catmullrom", 0.45);
-      addTube(curve, spec.radius, spec.dead ? 0.012 : 0.022, {
+      const limb = addTube(curve, spec.radius, spec.dead ? 0.012 : 0.022, {
         segments: spec.dead ? 28 : 48,
         radial: 11,
         wrinkle: 0.19,
@@ -954,12 +965,13 @@ export default function Home() {
       if (spec.dead) {
         const forkStart = curve.getPointAt(0.58);
         const forkTip = forkStart.clone().addScaledVector(side, 1.15).add(new THREE.Vector3(0.25, 0.55, 0));
-        addTube(
+        const fork = addTube(
           new THREE.CatmullRomCurve3([forkStart, forkStart.clone().lerp(forkTip, 0.55).add(new THREE.Vector3(0, 0.2, 0)), forkTip]),
           0.055,
           0.006,
           { segments: 12, radial: 6, wrinkle: 0.15 },
         );
+        rememberOffshoot(limb, fork);
         return;
       }
 
@@ -985,12 +997,13 @@ export default function Home() {
           .lerp(branchletTip, 0.78)
           .add(new THREE.Vector3(0, (random() - 0.5) * 0.28, 0));
         const branchletCurve = new THREE.CatmullRomCurve3([base, branchletMid, branchletMid2, branchletTip]);
-        addTube(branchletCurve, spec.radius * (0.25 + random() * 0.17), 0.007, {
+        const branchlet = addTube(branchletCurve, spec.radius * (0.25 + random() * 0.17), 0.007, {
           segments: 24,
           radial: 7,
           wrinkle: 0.16,
           moss: 0.25,
         });
+        rememberOffshoot(limb, branchlet);
         addFoliagePad(
           branchletTip,
           branchletDirection,
@@ -1015,11 +1028,12 @@ export default function Home() {
           .clone()
           .addScaledVector(twigDirection, 0.75 + random() * 0.7)
           .add(new THREE.Vector3(0, 0.3 + random() * 0.35, 0));
-        addTube(new THREE.CatmullRomCurve3([twigStart, twigStart.clone().lerp(twigTip, 0.5), twigTip]), 0.024, 0.003, {
+        const twig = addTube(new THREE.CatmullRomCurve3([twigStart, twigStart.clone().lerp(twigTip, 0.5), twigTip]), 0.024, 0.003, {
           segments: 10,
           radial: 5,
           wrinkle: 0.1,
         });
+        rememberOffshoot(limb, twig);
       }
     });
 
@@ -1175,11 +1189,16 @@ export default function Home() {
       new THREE.SpriteMaterial({
         map: bubbleTexture.texture,
         transparent: true,
-        depthTest: true,
+        // The sprite is one camera-facing quad. Depth testing slices the words
+        // wherever a nearer trunk, branch, or snow ridge crosses that quad, and
+        // the night sky (renderOrder 16) paints over whatever is left because
+        // the sprite does not write depth. Draw it last, on top of the scene.
+        depthTest: false,
         depthWrite: false,
         opacity: 0,
       }),
     );
+    bubble.renderOrder = 20;
     const bubbleY = terrainHeight(monkX, monkZ) + 4.05;
     bubble.position.set(monkX, bubbleY, monkZ);
     bubble.visible = false;
@@ -1280,7 +1299,8 @@ export default function Home() {
     const campfire = createCampfire();
     // In front of the monk, and a step to his right so the dog's spawn does not sit in the flames.
     // Right is derived from monkForward: (fz, 0, -fx).
-    const fireDistance = 1.85;
+    // 200% farther than 1.85: the old gap, plus twice that gap again.
+    const fireDistance = 1.85 * 3;
     const fireSide = 0.2;
     const fireX = monkX + monkForward.x * fireDistance + monkForward.z * fireSide;
     const fireZ = monkZ + monkForward.z * fireDistance - monkForward.x * fireSide;
@@ -1385,6 +1405,7 @@ export default function Home() {
       const sprite = new THREE.Sprite(material);
       sprite.position.set(settings.position[0], settings.position[1], settings.position[2]);
       sprite.scale.set(settings.scale[0], settings.scale[1], 1);
+      sprite.renderOrder = 2;
       scene.add(sprite);
       mistSprites.push({ sprite, baseX: settings.position[0], speed: 0.025 + index * 0.006, phase: random() * 6 });
     });
@@ -1401,6 +1422,7 @@ export default function Home() {
     );
     haze.position.set(-4, 12, -14);
     haze.scale.set(27, 24, 1);
+    haze.renderOrder = 2;
     scene.add(haze);
 
     const beamTexture = makeBeamTexture();
@@ -1423,6 +1445,7 @@ export default function Home() {
       );
       beam.position.set(settings.x, settings.y, settings.z);
       beam.scale.set(settings.scale, 27, 1);
+      beam.renderOrder = 2;
       scene.add(beam);
     });
 
@@ -1445,6 +1468,7 @@ export default function Home() {
         blending: THREE.AdditiveBlending,
       }),
     );
+    motes.renderOrder = 2;
     scene.add(motes);
 
     // Static geometry and lights only need one shadow-map render.
@@ -1484,18 +1508,167 @@ export default function Home() {
       pointerNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       pointerInside = true;
     };
+    // After the moon has finished rising, a click cuts a limb. The tube's
+    // origin is the buried trunk end, so the wood is in the vertices: drop
+    // that whole shape straight down. No velocity. A hold then keeps the
+    // grabbed point on the camera ray at the camera-to-flame distance, so
+    // the stick can move in every direction and lands in the fire when the
+    // cursor is on the fire. Letting go anywhere else drops it straight down.
+    type FelledLimb = { mesh: THREE.Mesh; dropToY: number; settled: boolean };
+    const felled: FelledLimb[] = [];
+    let carried: FelledLimb | null = null;
+    let carryArmed = false;
+    let carryDistance = 1;
+    let pendingCut: THREE.Mesh | null = null;
+    let pressX = 0;
+    let pressY = 0;
+    const branchRay = new THREE.Raycaster();
+    const branchBox = new THREE.Box3();
+    const dropCenter = new THREE.Vector3();
+    const grabOffsetWorld = new THREE.Vector3();
+    const grabPointWorld = new THREE.Vector3();
+    const flameWorld = new THREE.Vector3();
+    const CLICK_SLOP = 8;
+    const DROP_SPEED = 22;
+
+    const cuttableMeshes = () => limbs.filter((mesh) => !mesh.userData.felled);
+    const fallenMeshes = () => {
+      const meshes: THREE.Mesh[] = [];
+      for (const limb of felled) {
+        if (!limb.settled) continue;
+        limb.mesh.traverse((object) => {
+          const mesh = object as THREE.Mesh;
+          if (mesh.isMesh) meshes.push(mesh);
+        });
+      }
+      return meshes;
+    };
+    const fallenLimbOf = (object: THREE.Object3D) => {
+      let current: THREE.Object3D | null = object;
+      while (current) {
+        const limb = felled.find((entry) => entry.mesh === current);
+        if (limb) return limb;
+        current = current.parent;
+      }
+      return undefined;
+    };
+
+    const placeFlame = (target: THREE.Vector3) => {
+      const scale = campfire.group.scale.y;
+      target.copy(campfire.group.position);
+      target.y += 0.68 * scale;
+      return target;
+    };
+
+    // position.y that puts the lowest vertex on the snow. X and Z stay put.
+    const restedY = (mesh: THREE.Mesh) => {
+      mesh.updateWorldMatrix(true, false);
+      branchBox.setFromObject(mesh);
+      dropCenter.set((branchBox.min.x + branchBox.max.x) * 0.5, 0, (branchBox.min.z + branchBox.max.z) * 0.5);
+      const groundY = terrainHeight(dropCenter.x, dropCenter.z) + 0.04;
+      return mesh.position.y + (groundY - branchBox.min.y);
+    };
+
+    const cutBranch = (mesh: THREE.Mesh) => {
+      const extras = offshoots.get(mesh);
+      if (extras) {
+        for (const extra of extras) {
+          if (extra.userData.felled) continue;
+          extra.userData.felled = true;
+          // Keep the twig where it grew, then let the limb's later move carry it.
+          mesh.attach(extra);
+        }
+      }
+      mesh.userData.felled = true;
+      scene.attach(mesh);
+      felled.push({ mesh, dropToY: restedY(mesh), settled: false });
+      winter.refreshBranchSnow();
+    };
+
+    const burnBranch = (limb: FelledLimb) => {
+      limb.mesh.traverse((object) => {
+        const child = object as THREE.Mesh;
+        if (child.geometry) child.geometry.dispose();
+      });
+      offshoots.delete(limb.mesh);
+      offshoots.forEach((list) => {
+        const childIndex = list.indexOf(limb.mesh);
+        if (childIndex >= 0) list.splice(childIndex, 1);
+      });
+      limb.mesh.removeFromParent();
+      const index = felled.indexOf(limb);
+      if (index >= 0) felled.splice(index, 1);
+      campfire.grow();
+    };
+
+    const overFire = () => {
+      placeFlame(flameWorld);
+      const reach = 1.15 * campfire.group.scale.x + 0.5;
+      return grabPointWorld.distanceTo(flameWorld) <= reach;
+    };
+
     const onPointerDown = (event: PointerEvent) => {
-      dragging = true;
       hideConstellation();
       trackPointer(event);
+      pressX = event.clientX;
+      pressY = event.clientY;
+      carried = null;
+      carryArmed = false;
+      pendingCut = null;
+      canvas.setPointerCapture(event.pointerId);
+      if (nightSky?.moonFullyUp) {
+        branchRay.setFromCamera(pointerNdc, camera);
+        const hit = branchRay.intersectObjects([...fallenMeshes(), ...cuttableMeshes()], false)[0];
+        const fallen = hit ? fallenLimbOf(hit.object) : undefined;
+        if (fallen) {
+          carried = fallen;
+          grabOffsetWorld.copy(fallen.mesh.position).sub(hit.point);
+          carryDistance = camera.position.distanceTo(placeFlame(flameWorld));
+          canvas.style.cursor = "grabbing";
+          return;
+        }
+        if (hit) {
+          pendingCut = hit.object as THREE.Mesh;
+          return;
+        }
+      }
+      dragging = true;
       lastX = event.clientX;
       lastY = event.clientY;
-      canvas.setPointerCapture(event.pointerId);
     };
     const onPointerMove = (event: PointerEvent) => {
       trackPointer(event);
+      if (carried) {
+        if (!carryArmed) {
+          if (Math.hypot(event.clientX - pressX, event.clientY - pressY) <= CLICK_SLOP) return;
+          carryArmed = true;
+          carried.settled = false;
+        }
+        // View ray from the camera, not the ground plane. Length reaches the
+        // flames, so every cursor direction — including straight up — moves the stick.
+        branchRay.setFromCamera(pointerNdc, camera);
+        branchRay.ray.at(carryDistance, grabPointWorld);
+        carried.mesh.position.copy(grabPointWorld).add(grabOffsetWorld);
+        canvas.style.cursor = "grabbing";
+        return;
+      }
+      if (pendingCut) {
+        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) > CLICK_SLOP) {
+          pendingCut = null;
+          dragging = true;
+          lastX = event.clientX;
+          lastY = event.clientY;
+        } else {
+          return;
+        }
+      }
       if (!dragging) {
         updateConstellationHover(event);
+        if (nightSky?.moonFullyUp) {
+          branchRay.setFromCamera(pointerNdc, camera);
+          const hoverHit = branchRay.intersectObjects([...fallenMeshes(), ...cuttableMeshes()], false)[0];
+          canvas.style.cursor = hoverHit ? "pointer" : "";
+        } else canvas.style.cursor = "";
         return;
       }
       hideConstellation();
@@ -1511,7 +1684,20 @@ export default function Home() {
       );
     };
     const onPointerUp = (event: PointerEvent) => {
+      if (carried) {
+        if (carryArmed && overFire()) burnBranch(carried);
+        else if (carryArmed) {
+          carried.dropToY = restedY(carried.mesh);
+          carried.settled = false;
+        }
+        carried = null;
+        carryArmed = false;
+      } else if (pendingCut && nightSky?.moonFullyUp) {
+        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) <= CLICK_SLOP) cutBranch(pendingCut);
+        pendingCut = null;
+      }
       dragging = false;
+      canvas.style.cursor = "";
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     };
     // Zoom keeps the point under the cursor fixed. The ray is cast from the pose the
@@ -1732,7 +1918,17 @@ export default function Home() {
       }
 
       if (campfire.group.visible) campfire.update(now / 1000);
-      nightSky?.update(now);
+      for (const limb of felled) {
+        if (limb.settled || limb === carried) continue;
+        const remaining = limb.dropToY - limb.mesh.position.y;
+        if (reduceMotion || Math.abs(remaining) <= DROP_SPEED * delta) {
+          limb.mesh.position.y = limb.dropToY;
+          limb.settled = true;
+        } else {
+          limb.mesh.position.y += Math.sign(remaining) * DROP_SPEED * delta;
+        }
+      }
+      nightSky?.update(now, camera);
 
       renderer.render(scene, camera);
     };
@@ -1784,7 +1980,7 @@ export default function Home() {
           ref={dogCoordsRef}
           className="pointer-events-none absolute left-4 top-4 z-10 m-0 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4]"
         >
-          from tree   x +0.00   z +0.00   laps ↻ 0.0/3 → autumn
+          from tree   x +0.00   z +0.00   laps ↻ 0.0/0.5 → autumn
         </p>
         <div
           ref={constellationLabelRef}

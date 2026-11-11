@@ -1,6 +1,6 @@
 import { LAPS_TO_UNLOCK, LapTracker, type LapState } from "./lap-tracker";
 
-/** The scene always starts green and moves on one stage per three laps round the tree. */
+/** The scene always starts green and moves on one stage once the lap target is reached. */
 export const STAGES = ["green", "autumn", "winter"] as const;
 export type Stage = (typeof STAGES)[number];
 

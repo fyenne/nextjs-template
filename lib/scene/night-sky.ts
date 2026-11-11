@@ -11,6 +11,19 @@ const SKY_RADIUS = 182;
 const CONSTELLATION_RADIUS = 179;
 const STAR_RADIUS = 180;
 const VISIBILITY_ALTITUDE = 1.5;
+const GEMINI_MOON_HOVER_MS = 3000;
+const GEMINI_STAR_FADE_MS = 160;
+// A third of the previous 108s rise.
+const MOON_RISE_MS = (5400 * 20) / 3;
+const MOON_RADIUS_BEFORE = 3.35;
+const MOON_DISTANCE_BEFORE = 46;
+const MOON_END_Y_BEFORE = 22;
+const MOON_RADIUS = MOON_RADIUS_BEFORE * 15;
+// A 15× sphere at the old distance would swallow the camera. This distance keeps
+// the same 15× growth in angular size and still leaves the camera outside.
+const MOON_DISTANCE = MOON_RADIUS / Math.sin(Math.asin(MOON_RADIUS_BEFORE / MOON_DISTANCE_BEFORE) * 15);
+const MOON_START_Y = 1.4;
+const MOON_EXTRA_ELEVATION = (15 * Math.PI) / 180;
 
 type PointFeature = {
   id: string | number;
@@ -76,10 +89,9 @@ type ConstellationLine = {
   object: THREE.LineSegments;
   material: THREE.LineBasicMaterial;
   glowLine: THREE.LineSegments | null;
-  glowPoints: THREE.Points | null;
-  glowCore: THREE.Points | null;
   name: string;
 };
+type GeminiJoint = { halo: THREE.PointsMaterial; core: THREE.PointsMaterial };
 type FadingPoints = { material: THREE.PointsMaterial; opacity: number };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -276,6 +288,23 @@ function makeMilkyWayMaterial(galacticNorth: THREE.Vector3) {
   });
 }
 
+/** The stick-figure vertices are the stars the lines join. Smoothed samples in between are not. */
+function constellationStarPositions(feature: LineFeature, radius: number) {
+  const unique = new Map<string, [number, number, number]>();
+  feature.geometry.coordinates.forEach((polyline) => {
+    polyline.forEach(([ra, dec]) => {
+      const point = equatorialToHorizontal(ra, dec);
+      if (point.altitude < radians(VISIBILITY_ALTITUDE)) return;
+      unique.set(`${ra.toFixed(4)},${dec.toFixed(4)}`, [
+        point.direction.x * radius,
+        point.direction.y * radius,
+        point.direction.z * radius,
+      ]);
+    });
+  });
+  return Array.from(unique.values());
+}
+
 function buildConstellationPositions(feature: LineFeature, radius: number) {
   const positions: number[] = [];
   feature.geometry.coordinates.forEach((polyline) => {
@@ -327,6 +356,19 @@ export class NightSky {
   readonly root = new THREE.Group();
   readonly moon: THREE.DirectionalLight;
   readonly pointsTexture: THREE.Texture;
+
+  private readonly risenMoon: THREE.Group;
+  private readonly risenLight: THREE.DirectionalLight;
+  private readonly moonMap: THREE.Texture;
+  private geminiHoverSince: number | null = null;
+  private geminiJoints: GeminiJoint[] = [];
+  private moonRiseAt: number | null = null;
+  private moonIsUp = false;
+  private readonly moonBack = new THREE.Vector3();
+  private readonly moonAnchor = new THREE.Vector3();
+  private readonly moonLook = new THREE.Vector3();
+  private moonEyeY = 0;
+  private moonEndY = MOON_END_Y_BEFORE;
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly lines: ConstellationLine[] = [];
@@ -400,16 +442,72 @@ export class NightSky {
 
     this.addMilkyWayDust();
     this.addConstellations(lines, names);
+    this.addConstellationStars(lines);
 
     this.moon = new THREE.DirectionalLight("#b5caff", 0);
     this.moon.position.set(-24, 55, 14);
     this.moon.target.position.set(0, 5, 0);
     this.moon.castShadow = false;
     this.root.add(this.moon, this.moon.target);
+
+    // NASA SVS 4720 color map on a smooth sphere. The map's 0° longitude
+    // (near side) lands on the sphere's local +X.
+    this.moonMap = new THREE.TextureLoader().load("/sky/lroc_color_2k.jpg");
+    this.moonMap.colorSpace = THREE.SRGBColorSpace;
+    this.moonMap.anisotropy = Math.min(8, parts.renderer.capabilities.getMaxAnisotropy());
+    const moonBody = new THREE.Mesh(
+      new THREE.SphereGeometry(MOON_RADIUS, 128, 96),
+      new THREE.MeshBasicMaterial({
+        map: this.moonMap,
+        fog: false,
+        toneMapped: false,
+        // Opaque meshes all draw before transparent ones, and renderOrder cannot
+        // change that. The mountain cards are transparent, so the disc has to
+        // join that queue to cover them.
+        transparent: true,
+        opacity: 1,
+        depthWrite: true,
+      }),
+    );
+    moonBody.rotation.y = -Math.PI / 2;
+    moonBody.castShadow = false;
+    moonBody.receiveShadow = false;
+    // The shan-shui ridges are vertical cards around the garden. This disc is
+    // large enough to sit inside those rings, and the cards were blending a
+    // dark band across the lower limb. Draw it after the ridges (order 0) and
+    // before the night dome (order 8). Depth still keeps the ground and the
+    // tree in front. Snow and fire stay above this, at order 2 and 3.
+    moonBody.renderOrder = 1;
+    this.risenMoon = new THREE.Group();
+    this.risenMoon.name = "Risen moon";
+    this.risenMoon.add(moonBody);
+    this.risenMoon.visible = false;
+    this.root.add(this.risenMoon);
+
+    this.risenLight = new THREE.DirectionalLight("#e4ecff", 0);
+    this.risenLight.castShadow = false;
+    this.risenLight.shadow.mapSize.set(2048, 2048);
+    this.risenLight.shadow.bias = -0.00045;
+    this.risenLight.shadow.normalBias = 0.03;
+    const shadowCamera = this.risenLight.shadow.camera as THREE.OrthographicCamera;
+    shadowCamera.left = -28;
+    shadowCamera.right = 28;
+    shadowCamera.top = 28;
+    shadowCamera.bottom = -28;
+    shadowCamera.near = 8;
+    shadowCamera.far = 280;
+    shadowCamera.updateProjectionMatrix();
+    this.risenLight.target.position.set(0, 0.4, 0);
+    this.root.add(this.risenLight, this.risenLight.target);
   }
 
   get nightLevel() {
     return this.progress;
+  }
+
+  /** True once the risen moon has finished its climb. */
+  get moonFullyUp() {
+    return this.moonIsUp;
   }
 
   private addMilkyWayDust() {
@@ -432,6 +530,54 @@ export class NightSky {
       this.root.add(dust);
       this.pointMaterials.push({ material: dust.material as THREE.PointsMaterial, opacity: 0.26 });
     }
+  }
+
+  /** A star at every stick-figure joint, for every drawn constellation. Gemini's green glow stays separate. */
+  private addConstellationStars(lines: FeatureCollection<LineFeature>) {
+    const unique = new Map<string, [number, number, number]>();
+    lines.features.forEach((feature) => {
+      if (Number(feature.properties?.rank ?? "3") > 2) return;
+      const drawn = buildConstellationPositions(feature, CONSTELLATION_RADIUS);
+      if (drawn.length < 6) return;
+      constellationStarPositions(feature, CONSTELLATION_RADIUS).forEach((position) => {
+        unique.set(position.map((value) => value.toFixed(2)).join(","), position);
+      });
+    });
+    const positions = Array.from(unique.values()).flat();
+    if (positions.length === 0) return;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    const shared = {
+      sizeAttenuation: false,
+      map: this.pointsTexture,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      alphaTest: 0.01,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+      toneMapped: false,
+    } as const;
+    const halo = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({ ...shared, color: "#d5e4ff", size: 13 }),
+    );
+    const core = new THREE.Points(
+      geometry.clone(),
+      new THREE.PointsMaterial({ ...shared, color: "#f7fbff", size: 3.8 }),
+    );
+    halo.name = "Constellation stars";
+    core.name = "Constellation star cores";
+    halo.frustumCulled = false;
+    core.frustumCulled = false;
+    halo.renderOrder = 14;
+    core.renderOrder = 15;
+    this.root.add(halo, core);
+    this.pointMaterials.push(
+      { material: halo.material as THREE.PointsMaterial, opacity: 0.72 },
+      { material: core.material as THREE.PointsMaterial, opacity: 1 },
+    );
   }
 
   private addConstellations(
@@ -465,8 +611,6 @@ export class NightSky {
       this.root.add(object);
 
       let glowLine: THREE.LineSegments | null = null;
-      let glowPoints: THREE.Points | null = null;
-      let glowCore: THREE.Points | null = null;
       if (object.name === "Gemini") {
         const glowLineMaterial = new THREE.LineBasicMaterial({
           color: "#43ff8b",
@@ -483,6 +627,8 @@ export class NightSky {
 
         // Glow only the actual catalogued Gemini stars, not the extra points used
         // to smooth the constellation lines between them.
+        // Catalog order walks the main chain, then the short branch. Each joint
+        // gets its own material so the hover can light them one at a time.
         const uniquePositions = new Map<string, [number, number, number]>();
         feature.geometry.coordinates.forEach((polyline) => {
           polyline.forEach(([ra, dec]) => {
@@ -496,51 +642,34 @@ export class NightSky {
             uniquePositions.set(`${ra.toFixed(4)},${dec.toFixed(4)}`, world);
           });
         });
-        const haloGeometry = new THREE.BufferGeometry();
-        haloGeometry.setAttribute(
-          "position",
-          new THREE.Float32BufferAttribute(Array.from(uniquePositions.values()).flat(), 3),
-        );
-        const haloMaterial = new THREE.PointsMaterial({
-          color: "#43ff8b",
-          size: 22,
-          sizeAttenuation: false,
-          map: this.pointsTexture,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          alphaTest: 0.01,
-          blending: THREE.AdditiveBlending,
-          fog: false,
-          toneMapped: false,
+        uniquePositions.forEach((position) => {
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
+          const shared = {
+            sizeAttenuation: false,
+            map: this.pointsTexture,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            alphaTest: 0.01,
+            blending: THREE.AdditiveBlending,
+            fog: false,
+            toneMapped: false,
+          } as const;
+          const haloMaterial = new THREE.PointsMaterial({ ...shared, color: "#43ff8b", size: 22 });
+          const coreMaterial = new THREE.PointsMaterial({ ...shared, color: "#e5ffef", size: 4.5 });
+          const halo = new THREE.Points(geometry, haloMaterial);
+          const core = new THREE.Points(geometry.clone(), coreMaterial);
+          halo.frustumCulled = false;
+          core.frustumCulled = false;
+          halo.renderOrder = 15;
+          core.renderOrder = 16;
+          this.root.add(halo, core);
+          this.geminiJoints.push({ halo: haloMaterial, core: coreMaterial });
         });
-        glowPoints = new THREE.Points(haloGeometry, haloMaterial);
-        glowPoints.userData.constellationGlow = "Gemini";
-        glowPoints.frustumCulled = false;
-        glowPoints.renderOrder = 15;
-        this.root.add(glowPoints);
-
-        const coreMaterial = new THREE.PointsMaterial({
-          color: "#e5ffef",
-          size: 4.5,
-          sizeAttenuation: false,
-          map: this.pointsTexture,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          alphaTest: 0.01,
-          blending: THREE.AdditiveBlending,
-          fog: false,
-          toneMapped: false,
-        });
-        glowCore = new THREE.Points(haloGeometry.clone(), coreMaterial);
-        glowCore.userData.constellationGlow = "Gemini";
-        glowCore.frustumCulled = false;
-        glowCore.renderOrder = 16;
-        this.root.add(glowCore);
       }
 
-      this.lines.push({ object, material, glowLine, glowPoints, glowCore, name: object.name });
+      this.lines.push({ object, material, glowLine, name: object.name });
     });
   }
 
@@ -571,7 +700,7 @@ export class NightSky {
     this.startedAt = now;
   }
 
-  update(now: number) {
+  update(now: number, camera?: THREE.Camera) {
     if (this.startedAt === null) return;
     const t = clamp01((now - this.startedAt) / NIGHT_TRANSITION_MS);
     this.progress = smoothstep(t);
@@ -613,12 +742,68 @@ export class NightSky {
       else if (name === "Gemini" && name === this.hovered) material.color.set("#43ff8b");
       else material.color.set("#8da9d1");
     });
-    this.updateGeminiGlow();
-    this.moon.intensity = e * 2.0;
+    this.updateGeminiGlow(now);
+    const rise = this.stepRisenMoon(now, camera);
+    this.moon.intensity = e * 2.0 * (1 - rise * 0.8);
     if (t >= 1 && e === 1) renderer.shadowMap.needsUpdate = true;
   }
 
+  /**
+   * After Gemini has been hovered for 3 seconds, the moon rises behind the
+   * camera and shines toward the garden, so its shadow falls across the floor
+   * in the direction the camera is looking.
+   */
+  private stepRisenMoon(now: number, camera?: THREE.Camera) {
+    if (this.moonRiseAt === null) {
+      if (
+        !camera ||
+        this.geminiHoverSince === null ||
+        now - this.geminiHoverSince < GEMINI_MOON_HOVER_MS
+      ) {
+        return 0;
+      }
+      camera.getWorldDirection(this.moonLook);
+      this.moonLook.y = 0;
+      if (this.moonLook.lengthSq() < 1e-8) return 0;
+      this.moonLook.normalize();
+      // getWorldDirection is where the camera looks. Behind it is the opposite.
+      this.moonBack.copy(this.moonLook).negate();
+      this.moonAnchor.set(camera.position.x, 0, camera.position.z);
+      this.moonEyeY = camera.position.y;
+      const previousElevation = Math.atan2(MOON_END_Y_BEFORE - this.moonEyeY, MOON_DISTANCE_BEFORE);
+      const raised =
+        this.moonEyeY + Math.tan(previousElevation + MOON_EXTRA_ELEVATION) * MOON_DISTANCE;
+      // At 15× size that height still plants the sphere in the ground and slices the limb.
+      // Keep the +15° and lift only as far as a round disc above the snow.
+      this.moonEndY = Math.max(raised, MOON_RADIUS + 1.5);
+      this.moonRiseAt = now;
+      this.geminiHoverSince = null;
+      this.risenMoon.visible = true;
+      this.risenLight.castShadow = true;
+    }
+
+    const t = clamp01((now - this.moonRiseAt) / MOON_RISE_MS);
+    const ease = smoothstep(t);
+    if (ease >= 1) this.moonIsUp = true;
+    const y = MOON_START_Y + (this.moonEndY - MOON_START_Y) * ease;
+    this.risenMoon.position.set(
+      this.moonAnchor.x + this.moonBack.x * MOON_DISTANCE,
+      y,
+      this.moonAnchor.z + this.moonBack.z * MOON_DISTANCE,
+    );
+    this.risenMoon.lookAt(0, y, 0);
+    this.risenLight.position.copy(this.risenMoon.position);
+    this.risenLight.target.position.set(0, 0.4, 0);
+    this.risenLight.intensity = ease * 3.6;
+    return ease;
+  }
+
   setHovered(name: string | null) {
+    if (name === "Gemini") {
+      if (this.geminiHoverSince === null && this.moonRiseAt === null) this.geminiHoverSince = performance.now();
+    } else if (this.moonRiseAt === null) {
+      this.geminiHoverSince = null;
+    }
     this.hovered = name;
     const level = this.progress;
     this.lines.forEach(({ material, name: lineName }) => {
@@ -629,13 +814,26 @@ export class NightSky {
     this.updateGeminiGlow();
   }
 
-  private updateGeminiGlow() {
-    const opacity = this.hovered === "Gemini" ? this.progress : 0;
-    this.lines.forEach(({ glowLine, glowPoints, glowCore }) => {
-      if (!glowLine || !glowPoints || !glowCore) return;
-      (glowLine.material as THREE.LineBasicMaterial).opacity = opacity * 0.94;
-      (glowPoints.material as THREE.PointsMaterial).opacity = opacity * 0.78;
-      (glowCore.material as THREE.PointsMaterial).opacity = opacity * 0.95;
+  private updateGeminiGlow(now = performance.now()) {
+    const hovering = this.hovered === "Gemini";
+    const count = this.geminiJoints.length;
+    const span = Math.max(0, GEMINI_MOON_HOVER_MS - GEMINI_STAR_FADE_MS);
+    const step = count > 1 ? span / (count - 1) : 0;
+    const elapsed =
+      !hovering || this.geminiHoverSince === null
+        ? this.moonRiseAt !== null && hovering
+          ? GEMINI_MOON_HOVER_MS
+          : 0
+        : now - this.geminiHoverSince;
+    this.geminiJoints.forEach((joint, index) => {
+      const lit = hovering ? clamp01((elapsed - index * step) / GEMINI_STAR_FADE_MS) : 0;
+      joint.halo.opacity = lit * this.progress * 0.78;
+      joint.core.opacity = lit * this.progress * 0.95;
+    });
+    const lineOpacity = hovering ? this.progress * 0.94 : 0;
+    this.lines.forEach(({ glowLine }) => {
+      if (!glowLine) return;
+      (glowLine.material as THREE.LineBasicMaterial).opacity = lineOpacity;
     });
   }
 
@@ -658,5 +856,6 @@ export class NightSky {
       else material?.dispose();
     });
     this.pointsTexture.dispose();
+    this.moonMap.dispose();
   }
 }

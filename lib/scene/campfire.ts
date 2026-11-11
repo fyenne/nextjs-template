@@ -9,6 +9,8 @@ import * as THREE from "three";
 export type Campfire = {
   group: THREE.Group;
   update: (seconds: number) => void;
+  /** Each fed branch: the whole fire, including its light, grows by half, up to 4× its starting size. */
+  grow: () => void;
   dispose: () => void;
 };
 
@@ -224,6 +226,20 @@ export function createCampfire(): Campfire {
   light.castShadow = false;
   group.add(light);
 
+  let lightScale = 1;
+  // First feed records the winter starting scale (the caller sets 1.5). Later feeds stop at 4× that.
+  let baseScale = -1;
+  const grow = () => {
+    if (baseScale < 0) baseScale = group.scale.x || 1;
+    const current = group.scale.x || 1;
+    const cap = baseScale * 4;
+    if (current >= cap - 1e-4) return;
+    const factor = Math.min(current * 1.5, cap) / current;
+    group.scale.multiplyScalar(factor);
+    lightScale *= factor;
+    light.distance *= factor;
+  };
+
   const update = (seconds: number) => {
     for (let i = 0; i < flames.length; i += 1) {
       const flame = flames[i];
@@ -247,12 +263,13 @@ export function createCampfire(): Campfire {
     const pulse = 0.34 + Math.sin(seconds * 9.0) * 0.08;
     (glow.material as THREE.SpriteMaterial).opacity = pulse;
     glow.scale.set(1.05 + Math.sin(seconds * 7.0) * 0.08, 1.35 + Math.sin(seconds * 11.0) * 0.12, 1);
-    light.intensity = 2.5 + Math.sin(seconds * 13.0) * 0.7 + Math.sin(seconds * 29.0) * 0.45;
+    light.intensity = (2.5 + Math.sin(seconds * 13.0) * 0.7 + Math.sin(seconds * 29.0) * 0.45) * lightScale;
   };
 
   return {
     group,
     update,
+    grow,
     dispose: () => glowMap.dispose(),
   };
 }

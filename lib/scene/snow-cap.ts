@@ -130,27 +130,33 @@ function ringKeepsSnow(ring: SnowRing, segments: number) {
 
 type TrunkSample = { x: number; y: number; z: number; radius: number };
 
-function insideTrunk(spine: THREE.Vector3, samples: TrunkSample[]) {
-  let best = Infinity;
+function insideTrunk(spine: THREE.Vector3, samples: TrunkSample[], woodRadius: number) {
+  // Match the trunk width at this height. A fatter section lower down used to
+  // swallow the joint. The wood around the spine counts, so a thin crown limb
+  // keeps its snow as soon as the bark clears the trunk.
+  let bestDy = Infinity;
   let radius = 0;
+  let sx = 0;
+  let sz = 0;
   for (let i = 0; i < samples.length; i += 1) {
     const s = samples[i];
-    const dx = spine.x - s.x;
-    const dy = spine.y - s.y;
-    const dz = spine.z - s.z;
-    const d = dx * dx + dy * dy + dz * dz;
-    if (d < best) {
-      best = d;
+    const dy = Math.abs(spine.y - s.y);
+    if (dy < bestDy) {
+      bestDy = dy;
       radius = s.radius;
+      sx = s.x;
+      sz = s.z;
     }
   }
-  const limit = radius * 1.05;
-  return best < limit * limit;
+  if (bestDy > Math.max(0.35, radius)) return false;
+  const horizontal = Math.hypot(spine.x - sx, spine.z - sz);
+  return horizontal + woodRadius * 0.9 < radius * 0.98;
 }
 
 function appendLoft(
   rings: SnowRing[],
   reachTip: boolean,
+  seatRoot: boolean,
   positions: number[],
   colors: number[],
   finalY: number[],
@@ -217,6 +223,20 @@ function appendLoft(
     });
   }
 
+  if (seatRoot && stations.length >= 2) {
+    const first = stations[0];
+    const tuck = Math.min(first.halfWidth * 0.45, 0.045);
+    stations.unshift({
+      ridge: first.ridge.clone().addScaledVector(tangents[0], -tuck),
+      across: first.across,
+      halfWidth: first.halfWidth,
+      height: first.height * 0.14,
+      embed: first.embed,
+    });
+    stations[1].height *= 0.48;
+    if (stations.length > 2) stations[2].height *= 0.78;
+  }
+
   if (reachTip) {
     const last = stations[stations.length - 1];
     const tangent = tangents[n - 1];
@@ -278,7 +298,7 @@ export function buildTreeSnowGeometry(tree: THREE.Object3D) {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const tube = mesh.userData.tube as TubeMeta | undefined;
-    if (!tube) return;
+    if (!tube || mesh.userData.felled) return;
     const position = mesh.geometry.getAttribute("position");
     const stride = tube.radial + 1;
     if (!position || position.count < (tube.segments + 1) * stride) return;
@@ -316,13 +336,9 @@ export function buildTreeSnowGeometry(tree: THREE.Object3D) {
     if (maxY < 1.15) return;
 
     const isTrunk = tubeIndex === trunk;
-    const start = tube.rings[0]?.spine;
-    const rootLimit = !isTrunk && tube.rings[0] && tube.rings[0].radius < 0.14 ? Math.max(0.26, tube.rings[0].radius * 4) : 0;
     const keep = tube.rings.map((ring) => {
       if (!ringKeepsSnow(ring, tube.segments)) return false;
-      const tipZone = ring.index >= tube.segments - 2;
-      if (!isTrunk && samples.length > 0 && insideTrunk(ring.spine, samples)) return false;
-      if (rootLimit > 0 && start && !tipZone && ring.spine.distanceTo(start) < rootLimit) return false;
+      if (!isTrunk && samples.length > 0 && insideTrunk(ring.spine, samples, ring.radius)) return false;
       return true;
     });
     for (let i = 1; i < keep.length - 1; i += 1) {
@@ -333,7 +349,9 @@ export function buildTreeSnowGeometry(tree: THREE.Object3D) {
     let run: SnowRing[] = [];
     let runTip = false;
     const flush = () => {
-      if (run.length >= 2) appendLoft(run, runTip, positions, colors, finalY, sink, indices);
+      if (run.length >= 2) {
+        appendLoft(run, runTip, !isTrunk && run[0].index > 0, positions, colors, finalY, sink, indices);
+      }
       run = [];
       runTip = false;
     };

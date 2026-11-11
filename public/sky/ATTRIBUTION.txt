@@ -10,3 +10,13 @@ LICENSE.d3-celestial.txt for the copyright notice, conditions, and disclaimer.
 
 The sky projection, Milky Way dust field, and presentation code are original to
 this project.
+
+Moon color map
+--------------
+public/sky/lroc_color_2k.jpg is the 2048x1024 color map from NASA Scientific
+Visualization Studio, CGI Moon Kit, ID 4720:
+
+  https://svs.gsfc.nasa.gov/4720/
+
+Credit: NASA's Scientific Visualization Studio. Visualizer: Ernie Wright (STC).
+The map is painted on a smooth sphere. It is not a scientific product.

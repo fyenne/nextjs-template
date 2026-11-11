@@ -4,8 +4,9 @@ export const NIGHT_GREETING_HOLD_MS = 5000;
 export const NIGHT_TRANSITION_MS = 6500;
 
 const SKY_LATITUDE = 40;
-// Approximate local sidereal time for an early winter night around 22:00.
-const SKY_LOCAL_SIDEREAL_TIME = 300;
+// A late-evening winter sky, with the celestial sphere rotated to frame Gemini above the tree.
+const SKY_LOCAL_SIDEREAL_TIME = 5;
+const SKY_AZIMUTH_ROTATION = 120;
 const SKY_RADIUS = 182;
 const CONSTELLATION_RADIUS = 179;
 const STAR_RADIUS = 180;
@@ -71,7 +72,14 @@ type NightSnapshot = {
 };
 
 type HorizontalPosition = { direction: THREE.Vector3; altitude: number };
-type ConstellationLine = { object: THREE.LineSegments; material: THREE.LineBasicMaterial; name: string };
+type ConstellationLine = {
+  object: THREE.LineSegments;
+  material: THREE.LineBasicMaterial;
+  glowLine: THREE.LineSegments | null;
+  glowPoints: THREE.Points | null;
+  glowCore: THREE.Points | null;
+  name: string;
+};
 type FadingPoints = { material: THREE.PointsMaterial; opacity: number };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -96,7 +104,7 @@ export function equatorialToHorizontal(raDegrees: number, decDegrees: number): H
   const cosAzimuth =
     (Math.sin(declination) - Math.sin(altitude) * Math.sin(latitude)) /
     (cosAltitude * Math.cos(latitude));
-  const azimuth = Math.atan2(sinAzimuth, cosAzimuth);
+  const azimuth = Math.atan2(sinAzimuth, cosAzimuth) + radians(SKY_AZIMUTH_ROTATION);
   return {
     direction: new THREE.Vector3(
       Math.sin(azimuth) * cosAltitude,
@@ -455,7 +463,84 @@ export class NightSky {
       object.userData.constellationName = object.name;
       object.renderOrder = 13;
       this.root.add(object);
-      this.lines.push({ object, material, name: object.name });
+
+      let glowLine: THREE.LineSegments | null = null;
+      let glowPoints: THREE.Points | null = null;
+      let glowCore: THREE.Points | null = null;
+      if (object.name === "Gemini") {
+        const glowLineMaterial = new THREE.LineBasicMaterial({
+          color: "#43ff8b",
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          toneMapped: false,
+        });
+        glowLine = new THREE.LineSegments(geometry.clone(), glowLineMaterial);
+        glowLine.renderOrder = 14;
+        this.root.add(glowLine);
+
+        // Glow only the actual catalogued Gemini stars, not the extra points used
+        // to smooth the constellation lines between them.
+        const uniquePositions = new Map<string, [number, number, number]>();
+        feature.geometry.coordinates.forEach((polyline) => {
+          polyline.forEach(([ra, dec]) => {
+            const point = equatorialToHorizontal(ra, dec);
+            if (point.altitude < radians(VISIBILITY_ALTITUDE)) return;
+            const world: [number, number, number] = [
+              point.direction.x * STAR_RADIUS,
+              point.direction.y * STAR_RADIUS,
+              point.direction.z * STAR_RADIUS,
+            ];
+            uniquePositions.set(`${ra.toFixed(4)},${dec.toFixed(4)}`, world);
+          });
+        });
+        const haloGeometry = new THREE.BufferGeometry();
+        haloGeometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(Array.from(uniquePositions.values()).flat(), 3),
+        );
+        const haloMaterial = new THREE.PointsMaterial({
+          color: "#43ff8b",
+          size: 22,
+          sizeAttenuation: false,
+          map: this.pointsTexture,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          alphaTest: 0.01,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          toneMapped: false,
+        });
+        glowPoints = new THREE.Points(haloGeometry, haloMaterial);
+        glowPoints.userData.constellationGlow = "Gemini";
+        glowPoints.frustumCulled = false;
+        glowPoints.renderOrder = 15;
+        this.root.add(glowPoints);
+
+        const coreMaterial = new THREE.PointsMaterial({
+          color: "#e5ffef",
+          size: 4.5,
+          sizeAttenuation: false,
+          map: this.pointsTexture,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          alphaTest: 0.01,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          toneMapped: false,
+        });
+        glowCore = new THREE.Points(haloGeometry.clone(), coreMaterial);
+        glowCore.userData.constellationGlow = "Gemini";
+        glowCore.frustumCulled = false;
+        glowCore.renderOrder = 16;
+        this.root.add(glowCore);
+      }
+
+      this.lines.push({ object, material, glowLine, glowPoints, glowCore, name: object.name });
     });
   }
 
@@ -524,9 +609,11 @@ export class NightSky {
     });
     this.lines.forEach(({ material, name }) => {
       material.opacity = e * (name === this.hovered ? 0.96 : 0.24);
-      if (name === this.hovered) material.color.set("#c9dcff");
+      if (name === this.hovered && name !== "Gemini") material.color.set("#c9dcff");
+      else if (name === "Gemini" && name === this.hovered) material.color.set("#43ff8b");
       else material.color.set("#8da9d1");
     });
+    this.updateGeminiGlow();
     this.moon.intensity = e * 2.0;
     if (t >= 1 && e === 1) renderer.shadowMap.needsUpdate = true;
   }
@@ -537,7 +624,18 @@ export class NightSky {
     this.lines.forEach(({ material, name: lineName }) => {
       const active = name !== null && lineName === name;
       material.opacity = level * (active ? 0.96 : 0.24);
-      material.color.set(active ? "#c9dcff" : "#8da9d1");
+      material.color.set(active ? (lineName === "Gemini" ? "#43ff8b" : "#c9dcff") : "#8da9d1");
+    });
+    this.updateGeminiGlow();
+  }
+
+  private updateGeminiGlow() {
+    const opacity = this.hovered === "Gemini" ? this.progress : 0;
+    this.lines.forEach(({ glowLine, glowPoints, glowCore }) => {
+      if (!glowLine || !glowPoints || !glowCore) return;
+      (glowLine.material as THREE.LineBasicMaterial).opacity = opacity * 0.94;
+      (glowPoints.material as THREE.PointsMaterial).opacity = opacity * 0.78;
+      (glowCore.material as THREE.PointsMaterial).opacity = opacity * 0.95;
     });
   }
 

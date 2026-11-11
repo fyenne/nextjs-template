@@ -1,0 +1,21 @@
+{
+  "visitors": {
+    "74146d30-a4c1-46f2-a5e4-237e3a2b29fb": {
+      "id": "74146d30-a4c1-46f2-a5e4-237e3a2b29fb",
+      "firstSeenAt": "2026-11-11T07:50:11.704Z",
+      "lastSeenAt": "2026-11-11T09:33:35.873Z",
+      "visits": 4,
+      "ip": "10.42.61.83",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+      "browser": "Chrome 150 on Windows",
+      "laps": 3,
+      "direction": "ccw",
+      "autumnUnlocks": 4,
+      "winterUnlocks": 4,
+      "autumnUnlockedAt": "2026-11-11T07:50:37.119Z",
+      "lastAutumnAt": "2026-11-11T09:33:25.640Z",
+      "winterUnlockedAt": "2026-11-11T07:50:48.151Z",
+      "lastWinterAt": "2026-11-11T09:33:35.873Z"
+    }
+  }
+}

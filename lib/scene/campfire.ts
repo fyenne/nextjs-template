@@ -11,6 +11,8 @@ export type Campfire = {
   update: (seconds: number) => void;
   /** Each fed branch: the whole fire, including its light, grows by half, up to 4× its starting size. */
   grow: () => void;
+  /** True once the fire has reached that 4× cap. */
+  readonly atMaximum: boolean;
   dispose: () => void;
 };
 
@@ -175,7 +177,9 @@ export function createCampfire(): Campfire {
     const material = flameMaterial(phase, spec.height, spec.opacity);
     const mesh = new THREE.Mesh(flameGeometry(spec.radius, spec.height, spec.base, spec.tip), material);
     mesh.position.set(spec.x, 0.12, spec.z);
-    mesh.renderOrder = 3;
+    // After the star dome (order 16). The dome does not write depth, so a lower
+    // order let the night sky paint across the tall tips.
+    mesh.renderOrder = 18;
     group.add(mesh);
     flames.push({ mesh, material, phase });
   });
@@ -194,7 +198,7 @@ export function createCampfire(): Campfire {
     const angle = (i / 14) * Math.PI * 2;
     const radius = 0.04 + (i % 5) * 0.018;
     mesh.position.set(Math.cos(angle) * radius, 0.2, Math.sin(angle) * radius);
-    mesh.renderOrder = 3;
+    mesh.renderOrder = 18;
     group.add(mesh);
     embers.push({
       mesh,
@@ -218,7 +222,7 @@ export function createCampfire(): Campfire {
   );
   glow.position.set(0, 0.48, 0);
   glow.scale.set(1.15, 1.45, 1);
-  glow.renderOrder = 2;
+  glow.renderOrder = 18;
   group.add(glow);
 
   const light = new THREE.PointLight(0xff7a3a, 3.1, 6.5, 2);
@@ -229,15 +233,20 @@ export function createCampfire(): Campfire {
   let lightScale = 1;
   // First feed records the winter starting scale (the caller sets 1.5). Later feeds stop at 4× that.
   let baseScale = -1;
+  let atMaximum = false;
   const grow = () => {
     if (baseScale < 0) baseScale = group.scale.x || 1;
     const current = group.scale.x || 1;
     const cap = baseScale * 4;
-    if (current >= cap - 1e-4) return;
+    if (current >= cap - 1e-4) {
+      atMaximum = true;
+      return;
+    }
     const factor = Math.min(current * 1.5, cap) / current;
     group.scale.multiplyScalar(factor);
     lightScale *= factor;
     light.distance *= factor;
+    if (group.scale.x >= cap - 1e-4) atMaximum = true;
   };
 
   const update = (seconds: number) => {
@@ -270,6 +279,9 @@ export function createCampfire(): Campfire {
     group,
     update,
     grow,
+    get atMaximum() {
+      return atMaximum;
+    },
     dispose: () => glowMap.dispose(),
   };
 }

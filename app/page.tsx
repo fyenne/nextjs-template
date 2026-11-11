@@ -1131,6 +1131,13 @@ export default function Home() {
     monk.rotation.y = -0.18;
     monk.scale.setScalar(1.05);
     scene.add(monk);
+    // Feet sit on the group origin. The float follows the body, not the feet.
+    const monkBodyOffset = new THREE.Vector3();
+    monk.updateWorldMatrix(true, true);
+    const monkBounds = new THREE.Box3().setFromObject(monk);
+    monkBounds.getCenter(monkBodyOffset);
+    monkBodyOffset.sub(monk.position);
+    const monkRadius = monkBounds.getBoundingSphere(new THREE.Sphere()).radius;
 
     const monkLight = new THREE.PointLight(0xffc38f, 5.5, 7, 2);
     monkLight.position.set(monkX, 2.6, monkZ + 1.5);
@@ -1203,6 +1210,81 @@ export default function Home() {
     bubble.position.set(monkX, bubbleY, monkZ);
     bubble.visible = false;
     scene.add(bubble);
+    const bubbleOffset = new THREE.Vector3().subVectors(bubble.position, monk.position);
+    const monkLightOffset = new THREE.Vector3().subVectors(monkLight.position, monk.position);
+    const monkBodyWorld = new THREE.Vector3();
+    const moonCenterWorld = new THREE.Vector3();
+    const floatTargetWorld = new THREE.Vector3();
+    const toMoonWorld = new THREE.Vector3();
+    const tunnelAxis = new THREE.Vector3(0, 1, 0);
+    const tunnelDir = new THREE.Vector3();
+    const tunnelMid = new THREE.Vector3();
+    let floatTargetReady = false;
+    let monkArrived = false;
+    // Twice the old 0.4: about one body-length every three seconds.
+    const MONK_FLOAT_SPEED = 0.8;
+    // CylinderGeometry points along local +Y. Radius is 1.5× the monk's bounding sphere.
+    const tunnelRadius = monkRadius * 1.5;
+    const lightTunnel = new THREE.Mesh(
+      new THREE.CylinderGeometry(tunnelRadius, tunnelRadius, 1, 40, 1, false),
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.FrontSide,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        uniforms: { uRadius: { value: tunnelRadius } },
+        vertexShader: `
+          varying vec3 vViewPos;
+          varying vec3 vAxis;
+          varying vec3 vCenter;
+          varying float vAlong;
+          void main() {
+            vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
+            vViewPos = viewPos.xyz;
+            vAxis = normalize(mat3(modelViewMatrix) * vec3(0.0, 1.0, 0.0));
+            vCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+            // Geometry +Y is the moon end. position.y runs -0.5 at the monk to 0.5 at the moon.
+            vAlong = position.y + 0.5;
+            gl_Position = projectionMatrix * viewPos;
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vViewPos;
+          varying vec3 vAxis;
+          varying vec3 vCenter;
+          varying float vAlong;
+          uniform float uRadius;
+          void main() {
+            vec3 ray = normalize(vViewPos);
+            vec3 w0 = -vCenter;
+            float b = dot(ray, vAxis);
+            float d = dot(ray, w0);
+            float e = dot(vAxis, w0);
+            float denom = 1.0 - b * b;
+            float dist = length(cross(w0, vAxis));
+            if (denom > 1e-4) {
+              float t = (b * e - d) / denom;
+              float s = (e - b * d) / denom;
+              dist = length(w0 + ray * t - vAxis * s);
+            }
+            float glow = smoothstep(uRadius, uRadius * 0.12, dist);
+            float endFade = 1.0 - smoothstep(0.35, 1.0, vAlong);
+            if (glow * endFade <= 0.001) discard;
+            gl_FragColor = vec4(0.78, 0.88, 1.0, glow * endFade * 0.18);
+          }
+        `,
+      }),
+    );
+    lightTunnel.name = "Moon tunnel";
+    lightTunnel.visible = false;
+    lightTunnel.frustumCulled = false;
+    // Stars finish at 16 and do not write depth, so they used to paint over this beam.
+    // Draw after them. Depth testing still lets the moon, which writes depth, cover it.
+    lightTunnel.renderOrder = 18;
+    lightTunnel.castShadow = false;
+    lightTunnel.receiveShadow = false;
+    scene.add(lightTunnel);
 
     const paintBubble = (text: string, mode: SpeechMode) => {
       const next = makeBubbleTexture(text, mode);
@@ -1810,9 +1892,6 @@ export default function Home() {
         speechMode === "intro" || galacticReady ? THREE.MathUtils.smoothstep(facing, -0.2, 0.5) : 0;
       bubble.material.opacity = 0.94 * bubbleVisible;
       bubble.visible = bubbleVisible > 0.02;
-      if (bubble.visible) {
-        bubble.position.y = bubbleY + Math.sin(now * 0.0011) * 0.06;
-      }
 
       const trunkClearance = TREE_TRUNK_RADIUS + puppy.radius;
       // Winter is the last stage. The dog stays where it is and no longer follows the cursor.
@@ -1929,6 +2008,48 @@ export default function Home() {
         }
       }
       nightSky?.update(now, camera);
+      // Fire at its cap: drift the body center straight at the moon center.
+      // The target is fixed on the first frame, so the path stays one line.
+      if (!monkArrived && campfire.atMaximum && nightSky?.moonFullyUp && nightSky.moonCenter(moonCenterWorld)) {
+        if (!floatTargetReady) {
+          floatTargetWorld.copy(moonCenterWorld);
+          floatTargetReady = true;
+        }
+        monkBodyWorld.copy(monk.position).add(monkBodyOffset);
+        toMoonWorld.subVectors(floatTargetWorld, monkBodyWorld);
+        const remaining = toMoonWorld.length();
+        if (remaining > 1e-4) {
+          const step = Math.min(MONK_FLOAT_SPEED * delta, remaining);
+          monk.position.addScaledVector(toMoonWorld, step / remaining);
+          if (step >= remaining - 1e-6) monkArrived = true;
+        } else {
+          monk.position.add(toMoonWorld);
+          monkArrived = true;
+        }
+        monkLight.position.copy(monk.position).add(monkLightOffset);
+      }
+      // The glow is the segment from just behind his body to the moon center.
+      // Local +Y of the cylinder is turned onto that same line.
+      if (!floatTargetReady || monkArrived) {
+        lightTunnel.visible = false;
+      } else {
+        monkBodyWorld.copy(monk.position).add(monkBodyOffset);
+        tunnelDir.subVectors(floatTargetWorld, monkBodyWorld);
+        const span = tunnelDir.length();
+        if (span < 1e-3) {
+          lightTunnel.visible = false;
+        } else {
+          tunnelDir.multiplyScalar(1 / span);
+          const length = span + monkRadius;
+          tunnelMid.copy(monkBodyWorld).addScaledVector(tunnelDir, (span - monkRadius) * 0.5);
+          lightTunnel.position.copy(tunnelMid);
+          lightTunnel.quaternion.setFromUnitVectors(tunnelAxis, tunnelDir);
+          lightTunnel.scale.set(1, length, 1);
+          lightTunnel.visible = true;
+        }
+      }
+      bubble.position.copy(monk.position).add(bubbleOffset);
+      if (bubble.visible) bubble.position.y += Math.sin(now * 0.0011) * 0.06;
 
       renderer.render(scene, camera);
     };

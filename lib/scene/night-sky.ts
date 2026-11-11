@@ -510,6 +510,13 @@ export class NightSky {
     return this.moonIsUp;
   }
 
+  /** World position of the risen moon's center. The sphere is centered on the group. */
+  moonCenter(target: THREE.Vector3) {
+    if (!this.moonIsUp) return false;
+    this.risenMoon.getWorldPosition(target);
+    return true;
+  }
+
   private addMilkyWayDust() {
     const random = seeded(20261111);
     const positions: number[] = [];

@@ -323,7 +323,6 @@ type SpeechMode = "glyphs" | "intro";
 const WINTER_GREETING = "hello ! welcome to siming yan's inner garden, lets start our journey to know more of me";
 const WINTER_WORDS = WINTER_GREETING.split(" ");
 const WORD_POP_MS = 420;
-const GREETING_HOLD_MS = 5200;
 
 /** Meaningless Standard Galactic glyphs, 2–12 letters. */
 function nextMonkSnippet(previous = "") {
@@ -1193,10 +1192,10 @@ export default function Home() {
 
     let chatterTimer = 0;
     const scheduleChatter = () => {
-      const sentenceFull = wordCount >= WINTER_WORDS.length;
-      const delay = speechMode === "intro" ? (sentenceFull ? GREETING_HOLD_MS : WORD_POP_MS) : 2000 + Math.random() * 4000;
+      if (speechMode === "intro" && wordCount >= WINTER_WORDS.length) return;
+      const delay = speechMode === "intro" ? WORD_POP_MS : 2000 + Math.random() * 4000;
       chatterTimer = window.setTimeout(() => {
-        if (speechMode === "intro") wordCount = sentenceFull ? 1 : wordCount + 1;
+        if (speechMode === "intro") wordCount += 1;
         else spoken = nextMonkSnippet(spoken);
         showSpeech();
         scheduleChatter();

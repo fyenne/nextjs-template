@@ -1,0 +1,12 @@
+Star positions and constellation linework
+-----------------------------------------
+The star catalog, constellation lines, and English constellation names in this
+directory are from d3-celestial by Olaf Frohn:
+
+  https://github.com/ofrohn/d3-celestial
+
+They are redistributed under the BSD 3-Clause License. See
+LICENSE.d3-celestial.txt for the copyright notice, conditions, and disclaimer.
+
+The sky projection, Milky Way dust field, and presentation code are original to
+this project.

@@ -9,6 +9,11 @@ import { createPuppy, easeTongue } from "@/lib/scene/puppy";
 import { SceneStages } from "@/lib/scene/stages";
 import { VisitorSession } from "@/lib/scene/visitor";
 import { createCampfire } from "@/lib/scene/campfire";
+import {
+  createNightSky,
+  NIGHT_GREETING_HOLD_MS,
+  type NightSky,
+} from "@/lib/scene/night-sky";
 import { WinterTransition } from "@/lib/scene/winter";
 import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
@@ -597,6 +602,7 @@ export default function Home() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dogCoordsRef = useRef<HTMLParagraphElement | null>(null);
+  const constellationLabelRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
   const desiredRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
 
@@ -652,11 +658,11 @@ export default function Home() {
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2("#243b3e", 0.016);
 
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 220);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
 
     const hemisphere = new THREE.HemisphereLight(0xb9d0cd, 0x101912, 1.25);
-    scene.add(hemisphere);
-    scene.add(new THREE.AmbientLight(0x54706a, 0.34));
+    const ambient = new THREE.AmbientLight(0x54706a, 0.34);
+    scene.add(hemisphere, ambient);
 
     const key = new THREE.DirectionalLight(0xffe1b3, 3.1);
     key.position.set(-11, 24, 10);
@@ -1160,6 +1166,10 @@ export default function Home() {
     let wordCount = 1;
     let spoken = nextMonkSnippet();
     let galacticReady = false;
+    let cancelled = false;
+    let nightTimer: number | null = null;
+    let nightStartedAt: number | null = null;
+    let nightSky: NightSky | null = null;
     let bubbleTexture = makeBubbleTexture(" ");
     const bubble = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -1190,9 +1200,21 @@ export default function Home() {
       else if (galacticReady) paintBubble(spoken, "glyphs");
     };
 
+    const startNightTransition = () => {
+      nightTimer = null;
+      if (cancelled || nightStartedAt !== null) return;
+      nightStartedAt = performance.now();
+      nightSky?.start(nightStartedAt);
+    };
+
     let chatterTimer = 0;
     const scheduleChatter = () => {
-      if (speechMode === "intro" && wordCount >= WINTER_WORDS.length) return;
+      if (speechMode === "intro" && wordCount >= WINTER_WORDS.length) {
+        if (nightTimer === null && nightStartedAt === null) {
+          nightTimer = window.setTimeout(startNightTransition, NIGHT_GREETING_HOLD_MS);
+        }
+        return;
+      }
       const delay = speechMode === "intro" ? WORD_POP_MS : 2000 + Math.random() * 4000;
       chatterTimer = window.setTimeout(() => {
         if (speechMode === "intro") wordCount += 1;
@@ -1212,7 +1234,30 @@ export default function Home() {
       scheduleChatter();
     };
 
-    let cancelled = false;
+    void createNightSky({
+      scene,
+      renderer,
+      fog: scene.fog as THREE.FogExp2,
+      hemisphere,
+      ambient,
+      key,
+      rim,
+      fill,
+      monkLight,
+      mountains: mountainMaterials,
+    })
+      .then((sky) => {
+        if (cancelled) {
+          sky.dispose();
+          return;
+        }
+        nightSky = sky;
+        if (nightStartedAt !== null) sky.start(nightStartedAt);
+      })
+      .catch((error: unknown) => {
+        console.error("Could not load night-sky star data", error);
+      });
+
     let fontLoad = Promise.resolve();
     if (typeof document !== "undefined" && "fonts" in document) {
       fontLoad = document.fonts.load(GALACTIC_FONT).then(() => undefined);
@@ -1411,6 +1456,28 @@ export default function Home() {
     let lastY = 0;
     let pointerInside = false;
     const pointerNdc = new THREE.Vector2();
+    const hideConstellation = () => {
+      nightSky?.setHovered(null);
+      if (constellationLabelRef.current) constellationLabelRef.current.style.display = "none";
+    };
+    const updateConstellationHover = (event: PointerEvent) => {
+      const label = constellationLabelRef.current;
+      if (!label || dragging || !nightSky) {
+        hideConstellation();
+        return;
+      }
+      const name = nightSky.pick(camera, pointerNdc);
+      if (!name) {
+        hideConstellation();
+        return;
+      }
+      nightSky.setHovered(name);
+      const rect = wrap.getBoundingClientRect();
+      label.textContent = name;
+      label.style.left = `${THREE.MathUtils.clamp(event.clientX - rect.left + 14, 8, rect.width - 150)}px`;
+      label.style.top = `${THREE.MathUtils.clamp(event.clientY - rect.top + 16, 8, rect.height - 44)}px`;
+      label.style.display = "block";
+    };
     const trackPointer = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
       pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1419,6 +1486,7 @@ export default function Home() {
     };
     const onPointerDown = (event: PointerEvent) => {
       dragging = true;
+      hideConstellation();
       trackPointer(event);
       lastX = event.clientX;
       lastY = event.clientY;
@@ -1426,7 +1494,11 @@ export default function Home() {
     };
     const onPointerMove = (event: PointerEvent) => {
       trackPointer(event);
-      if (!dragging) return;
+      if (!dragging) {
+        updateConstellationHover(event);
+        return;
+      }
+      hideConstellation();
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
       lastX = event.clientX;
@@ -1488,6 +1560,7 @@ export default function Home() {
     };
     const onPointerLeave = () => {
       pointerInside = false;
+      hideConstellation();
     };
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
@@ -1659,6 +1732,7 @@ export default function Home() {
       }
 
       if (campfire.group.visible) campfire.update(now / 1000);
+      nightSky?.update(now);
 
       renderer.render(scene, camera);
     };
@@ -1669,6 +1743,8 @@ export default function Home() {
       abortVisitor.abort();
       cancelAnimationFrame(frame);
       window.clearTimeout(chatterTimer);
+      if (nightTimer !== null) window.clearTimeout(nightTimer);
+      nightSky?.dispose();
       bubbleTexture.texture.dispose();
       observer.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
@@ -1710,6 +1786,11 @@ export default function Home() {
         >
           from tree   x +0.00   z +0.00   laps ↻ 0.0/3 → autumn
         </p>
+        <div
+          ref={constellationLabelRef}
+          role="tooltip"
+          className="pointer-events-none absolute z-30 hidden rounded-full border border-blue-100/40 bg-slate-950/85 px-3 py-1.5 font-serif text-sm tracking-wide text-blue-50 shadow-lg shadow-blue-900/30 backdrop-blur-sm"
+        />
         <div
           className="pointer-events-none absolute inset-0"
           style={{

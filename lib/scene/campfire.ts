@@ -9,6 +9,7 @@ import * as THREE from "three";
 export type Campfire = {
   group: THREE.Group;
   update: (seconds: number) => void;
+  dispose: () => void;
 };
 
 type Flame = {
@@ -202,9 +203,10 @@ export function createCampfire(): Campfire {
     });
   }
 
+  const glowMap = glowTexture();
   const glow = new THREE.Sprite(
     new THREE.SpriteMaterial({
-      map: glowTexture(),
+      map: glowMap,
       color: 0xff7a3c,
       transparent: true,
       opacity: 0.42,
@@ -248,5 +250,9 @@ export function createCampfire(): Campfire {
     light.intensity = 2.5 + Math.sin(seconds * 13.0) * 0.7 + Math.sin(seconds * 29.0) * 0.45;
   };
 
-  return { group, update };
+  return {
+    group,
+    update,
+    dispose: () => glowMap.dispose(),
+  };
 }

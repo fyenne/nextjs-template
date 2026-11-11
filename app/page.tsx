@@ -1692,6 +1692,7 @@ export default function Home() {
       geometries.forEach((geometry) => geometry.dispose());
       materials.forEach((material) => material.dispose());
       textures.forEach((texture) => texture.dispose());
+      campfire.dispose();
       renderer.dispose();
     };
   }, []);

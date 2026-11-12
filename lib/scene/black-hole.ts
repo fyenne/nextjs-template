@@ -1,8 +1,17 @@
 import * as THREE from "three";
 import { SKY_LAYER, WORLD_LAYER } from "./night-sky";
 
-/** Length of the whole sequence: a quick grow that swallows everything, then the shrink to the gold point. */
+/** Length of the swallow: a quick grow, then the shrink to the gold point. The hold and the final rush come after. */
 const BLACK_HOLE_DURATION_MS = 5500;
+/** Pause on the gold point before the hole rushes out. */
+const BLACK_HOLE_HOLD_MS = 2500;
+/** The last rush. Short, so the disc covers the frame quickly. */
+const BLACK_HOLE_DARKEN_MS = 800;
+/**
+ * Shadow radius, as a fraction of screen height, at the end of the rush.
+ * Above ~2 the disc covers a wide frame, corners included, when the hole is on screen.
+ */
+const DARKEN_SHADOW = 3.4;
 /** Converts the look's shadow fraction into Schwarzschild radii. */
 const SHADOW_RADIUS_RS = 2.6;
 /** Photon capture radius, 3 * sqrt(3) M, in Schwarzschild radii (rs = 2M): light closer than this is lost. */
@@ -165,6 +174,7 @@ const FRAGMENT_SHADER = `
   uniform float uLobes;
   uniform float uExposure;
   uniform float uTime;
+  uniform float uVeil;
   varying vec2 vUv;
 
   const int MAX_STEPS = 64;
@@ -378,6 +388,7 @@ const FRAGMENT_SHADER = `
 
     vec3 sky = texture2D(tSky, vUv).rgb;
     vec3 color = filmic((lit + transmit * world) * uExposure) + sky * (1.0 - coverage) * transmit;
+    color = mix(color, vec3(0.0), clamp(uVeil, 0.0, 1.0));
     gl_FragColor = vec4(color, 1.0);
     #include <colorspace_fragment>
   }
@@ -414,6 +425,7 @@ export class BlackHoleEffect {
   private startedAt: number | null = null;
   private durationMs = BLACK_HOLE_DURATION_MS;
   private currentProgress = 0;
+  private darkened = false;
   private currentCollapse = 0;
 
   constructor() {
@@ -455,6 +467,7 @@ export class BlackHoleEffect {
         uLobes: { value: 0 },
         uExposure: { value: 1 },
         uTime: { value: 0 },
+        uVeil: { value: 0 },
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
@@ -473,6 +486,11 @@ export class BlackHoleEffect {
 
   get progress() {
     return this.currentProgress;
+  }
+
+  /** True once the final rush has covered the frame. */
+  get fullyDark() {
+    return this.darkened;
   }
 
   /** How far the moon is drawn into the funnel right now, from 0 to the look's moonPull. */
@@ -521,8 +539,17 @@ export class BlackHoleEffect {
     if (!this.diskReady) this.orientDisk(camera.position);
 
     const elapsed = Math.max(0, now - this.startedAt);
-    const progress = this.durationMs === 0 ? 1 : THREE.MathUtils.clamp(elapsed / this.durationMs, 0, 1);
+    const skipped = this.durationMs === 0;
+    const progress = skipped ? 1 : THREE.MathUtils.clamp(elapsed / BLACK_HOLE_DURATION_MS, 0, 1);
     this.currentProgress = progress;
+    const sinceGold = elapsed - BLACK_HOLE_DURATION_MS;
+    const darken = skipped
+      ? 1
+      : sinceGold <= BLACK_HOLE_HOLD_MS
+        ? 0
+        : THREE.MathUtils.clamp((sinceGold - BLACK_HOLE_HOLD_MS) / BLACK_HOLE_DARKEN_MS, 0, 1);
+    const rush = THREE.MathUtils.smoothstep(darken, 0, 1);
+    this.darkened = darken >= 1;
 
     // World length of one screen-height unit at the hole's distance.
     const screenUnit = 2 * Math.max(0.01, this.contact.distanceTo(camera.position)) * tanHalf;
@@ -532,9 +559,13 @@ export class BlackHoleEffect {
     const fade = 1 - THREE.MathUtils.smoothstep(progress, SWALLOW_DONE, GONE_AT);
     const shrink = THREE.MathUtils.smoothstep(progress, GONE_AT, 1);
     const shadow = THREE.MathUtils.lerp(
-      THREE.MathUtils.lerp(SHADOW_START, this.look.shadowPeak, grow),
-      SHADOW_END,
-      shrink,
+      THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(SHADOW_START, this.look.shadowPeak, grow),
+        SHADOW_END,
+        shrink,
+      ),
+      DARKEN_SHADOW,
+      rush,
     );
     const eatP = THREE.MathUtils.lerp(EAT_SEED, this.look.swallowEnd, swallow);
     this.currentCollapse = collapse;
@@ -562,6 +593,8 @@ export class BlackHoleEffect {
     uniforms.uLobes.value = this.look.lobes * collapse;
     uniforms.uExposure.value = renderer.toneMappingExposure;
     uniforms.uTime.value = elapsed / 1000;
+    // The disc does the covering. The veil finishes the corners once the rush is under way.
+    uniforms.uVeil.value = THREE.MathUtils.smoothstep(darken, 0.4, 1);
 
     const previousTarget = renderer.getRenderTarget();
     const previousAutoClear = renderer.autoClear;

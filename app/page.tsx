@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import AsciiCube from "@/components/ascii/AsciiCube";
 import * as THREE from "three";
 import { AutumnTransition } from "@/lib/scene/autumn";
 import { TREE_TRUNK_RADIUS, stepDog, type DogMotion } from "@/lib/scene/dog-motion";
@@ -606,8 +607,45 @@ export default function Home() {
   const dogCoordsRef = useRef<HTMLParagraphElement | null>(null);
   const constellationLabelRef = useRef<HTMLDivElement | null>(null);
   const vignetteRef = useRef<HTMLDivElement | null>(null);
+  const [showAscii, setShowAscii] = useState(false);
+  const [musicMuted, setMusicMuted] = useState(false);
+  const musicRef = useRef<HTMLAudioElement | null>(null);
   const viewRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
   const desiredRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
+
+  useEffect(() => {
+    const music = musicRef.current;
+    if (!music) return;
+    music.volume = 0.6;
+    music.preload = "auto";
+    let playing = false;
+    const start = () => {
+      if (playing || music.muted) return;
+      const pending = music.play();
+      if (!pending) {
+        playing = true;
+        return;
+      }
+      void pending.then(
+        () => {
+          playing = true;
+        },
+        () => {
+          playing = false;
+        },
+      );
+    };
+    start();
+    music.addEventListener("canplay", start);
+    const unlock = () => start();
+    window.addEventListener("pointerdown", unlock, true);
+    window.addEventListener("keydown", unlock, true);
+    return () => {
+      music.removeEventListener("canplay", start);
+      window.removeEventListener("pointerdown", unlock, true);
+      window.removeEventListener("keydown", unlock, true);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -650,6 +688,8 @@ export default function Home() {
     const debugMonkFlight = debugParams.get("debug") === "monk-flight";
     const debugSwallow = debugParams.get("debug") === "swallow";
     const debugScene = debugMonkFlight || debugSwallow;
+    const showHud = debugScene || dogPreview.startsWith("#dog") || dogPreview.startsWith("#pair");
+    if (dogCoordsRef.current) dogCoordsRef.current.hidden = !showHud;
     const blackHoleLook =
       BLACK_HOLE_LOOKS[Math.min(BLACK_HOLE_LOOKS.length - 1, Math.max(0, (Number(debugParams.get("look")) || 2) - 1))];
     const debugStartMs = debugSwallow ? Math.max(0, Number(debugParams.get("t")) || 0) : 0;
@@ -1604,9 +1644,15 @@ export default function Home() {
     renderer.shadowMap.needsUpdate = true;
 
     let dragging = false;
+    let touchTracking = false;
+    let gestureMoved = false;
+    let lastTapAt = 0;
     let lastX = 0;
     let lastY = 0;
     let pointerInside = false;
+    const activePointers = new Map<number, { x: number; y: number }>();
+    let pinchDistance = 0;
+    canvas.style.touchAction = "none";
     const pointerNdc = new THREE.Vector2();
     const hideConstellation = () => {
       nightSky?.setHovered(null);
@@ -1735,15 +1781,33 @@ export default function Home() {
       return grabPointWorld.distanceTo(flameWorld) <= reach;
     };
 
+    const pointerSpan = () => {
+      const points = Array.from(activePointers.values());
+      if (points.length < 2) return 0;
+      return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+    };
+    const slopFor = (event: PointerEvent) => (event.pointerType === "touch" ? 14 : CLICK_SLOP);
     const onPointerDown = (event: PointerEvent) => {
       hideConstellation();
       trackPointer(event);
       pressX = event.clientX;
       pressY = event.clientY;
+      gestureMoved = false;
       carried = null;
       carryArmed = false;
       pendingCut = null;
-      canvas.setPointerCapture(event.pointerId);
+      activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {
+        // iOS can reject capture if the touch already ended.
+      }
+      if (activePointers.size >= 2) {
+        dragging = false;
+        touchTracking = false;
+        pinchDistance = pointerSpan();
+        return;
+      }
       if (nightSky?.moonFullyUp) {
         branchRay.setFromCamera(pointerNdc, camera);
         const hit = branchRay.intersectObjects([...fallenMeshes(), ...cuttableMeshes()], false)[0];
@@ -1760,12 +1824,30 @@ export default function Home() {
           return;
         }
       }
-      dragging = true;
+      // A finger rests to aim the dog. The orbit starts only after it actually drags.
+      touchTracking = event.pointerType === "touch";
+      dragging = event.pointerType !== "touch";
       lastX = event.clientX;
       lastY = event.clientY;
     };
     const onPointerMove = (event: PointerEvent) => {
       trackPointer(event);
+      if (activePointers.has(event.pointerId)) {
+        activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+      if (activePointers.size >= 2) {
+        const span = pointerSpan();
+        if (pinchDistance > 0 && span > 0) {
+          const points = Array.from(activePointers.values());
+          const midX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+          const midY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+          zoomAt(midX, midY, pinchDistance / span);
+        }
+        pinchDistance = span;
+        dragging = false;
+        touchTracking = false;
+        return;
+      }
       if (carried) {
         if (!carryArmed) {
           if (Math.hypot(event.clientX - pressX, event.clientY - pressY) <= CLICK_SLOP) return;
@@ -1778,10 +1860,22 @@ export default function Home() {
         branchRay.ray.at(carryDistance, grabPointWorld);
         carried.mesh.position.copy(grabPointWorld).add(grabOffsetWorld);
         canvas.style.cursor = "grabbing";
+        gestureMoved = true;
+        return;
+      }
+      if (touchTracking && !dragging) {
+        updateConstellationHover(event);
+        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) > slopFor(event)) {
+          touchTracking = false;
+          dragging = true;
+          gestureMoved = true;
+          lastX = event.clientX;
+          lastY = event.clientY;
+        }
         return;
       }
       if (pendingCut) {
-        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) > CLICK_SLOP) {
+        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) > slopFor(event)) {
           pendingCut = null;
           dragging = true;
           lastX = event.clientX;
@@ -1800,6 +1894,7 @@ export default function Home() {
         return;
       }
       hideConstellation();
+      gestureMoved = true;
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
       lastX = event.clientX;
@@ -1812,6 +1907,9 @@ export default function Home() {
       );
     };
     const onPointerUp = (event: PointerEvent) => {
+      const tapped = event.pointerType === "touch" && !gestureMoved && !carryArmed;
+      activePointers.delete(event.pointerId);
+      pinchDistance = pointerSpan();
       if (carried) {
         if (carryArmed && overFire()) burnBranch(carried);
         else if (carryArmed) {
@@ -1821,10 +1919,19 @@ export default function Home() {
         carried = null;
         carryArmed = false;
       } else if (pendingCut && nightSky?.moonFullyUp) {
-        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) <= CLICK_SLOP) cutBranch(pendingCut);
+        if (Math.hypot(event.clientX - pressX, event.clientY - pressY) <= slopFor(event)) cutBranch(pendingCut);
         pendingCut = null;
+      } else if (tapped) {
+        const nowTap = performance.now();
+        if (nowTap - lastTapAt < 320) onDoubleClick();
+        lastTapAt = nowTap;
+      }
+      if (event.pointerType === "touch") {
+        pointerInside = false;
+        hideConstellation();
       }
       dragging = false;
+      touchTracking = false;
       canvas.style.cursor = "";
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     };
@@ -1834,12 +1941,11 @@ export default function Home() {
     const zoomRay = new THREE.Raycaster();
     const zoomNdc = new THREE.Vector2();
     const zoomTargets: THREE.Object3D[] = [ground, tree, foliage, monk, dog];
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
+    const zoomAt = (clientX: number, clientY: number, factor: number) => {
       const rect = canvas.getBoundingClientRect();
       zoomNdc.set(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
       );
       const desired = desiredRef.current;
       zoomCamera.aspect = camera.aspect;
@@ -1854,15 +1960,13 @@ export default function Home() {
       const depth = hit ? Math.min(hit.distance, maxDepth) : desired.distance * fitScale;
       const anchor = zoomRay.ray.at(depth, new THREE.Vector3());
 
-      const zoomed = zoomAboutAnchor(
-        desired.distance,
-        desired.target,
-        zoomCamera.position,
-        anchor,
-        wheelToFactor(event.deltaY, event.deltaMode),
-      );
+      const zoomed = zoomAboutAnchor(desired.distance, desired.target, zoomCamera.position, anchor, factor);
       desired.distance = zoomed.distance;
       desired.target.set(zoomed.target.x, zoomed.target.y, zoomed.target.z);
+    };
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      zoomAt(event.clientX, event.clientY, wheelToFactor(event.deltaY, event.deltaMode));
     };
     const onDoubleClick = () => {
       const desired = desiredRef.current;
@@ -1883,6 +1987,9 @@ export default function Home() {
     canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("dblclick", onDoubleClick);
+    const blockGesture = (event: Event) => event.preventDefault();
+    canvas.addEventListener("gesturestart", blockGesture);
+    canvas.addEventListener("gesturechange", blockGesture);
 
     let fitScale = 1;
     const placeCamera = (
@@ -2124,6 +2231,10 @@ export default function Home() {
 
       if (blackHoleEffect.started) nightSky?.collapseMoon(contactWorld, blackHoleEffect.moonCollapse);
       blackHoleEffect.render(renderer, scene, camera, now);
+      if (blackHoleEffect.fullyDark) {
+        cancelAnimationFrame(frame);
+        setShowAscii(true);
+      }
     };
     animate();
 
@@ -2144,6 +2255,8 @@ export default function Home() {
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDoubleClick);
+      canvas.removeEventListener("gesturestart", blockGesture);
+      canvas.removeEventListener("gesturechange", blockGesture);
 
       const geometries = new Set<THREE.BufferGeometry>();
       const materials = new Set<THREE.Material>();
@@ -2163,18 +2276,39 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-[#17292d]">
+    <main className="fixed inset-0 h-[100dvh] touch-none overflow-hidden overscroll-none bg-[#17292d]">
       <div ref={wrapRef} className="relative h-full w-full">
         <canvas
           ref={canvasRef}
           aria-label="A windswept Chinese pine among misty mountains. A golden puppy on the grass follows the cursor."
           className="absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing"
         />
+        <button
+          type="button"
+          aria-label={musicMuted ? "Unmute music" : "Mute music"}
+          onClick={() => {
+            const music = musicRef.current;
+            if (!music) return;
+            if (music.paused) {
+              music.muted = false;
+              setMusicMuted(false);
+              void music.play().catch(() => {});
+              return;
+            }
+            music.muted = !music.muted;
+            setMusicMuted(music.muted);
+          }}
+          className="absolute left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 min-h-11 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4] opacity-40 transition-opacity hover:opacity-80 active:opacity-80"
+        >
+          {musicMuted ? "muted" : "music"}
+        </button>
+        <audio ref={musicRef} src="/music/bwv565-fugue.mp3" loop autoPlay playsInline />
         <p
           ref={dogCoordsRef}
-          className="pointer-events-none absolute left-4 top-4 z-10 m-0 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4]"
+          hidden
+          className="pointer-events-none absolute left-4 top-14 z-10 m-0 rounded-md bg-black/40 px-2.5 py-1 font-mono text-xs tracking-wide text-[#f3efe4]"
         >
-          from tree   x +0.00   z +0.00   laps ↻ 0.0/0.5 → autumn
+          from tree   x +0.00   z +0.00   laps ↻ 0.0/3 → autumn
         </p>
         <div
           ref={constellationLabelRef}
@@ -2189,6 +2323,11 @@ export default function Home() {
               "radial-gradient(ellipse at 52% 43%, transparent 35%, rgba(3, 10, 12, 0.12) 70%, rgba(2, 7, 9, 0.52) 120%)",
           }}
         />
+        {showAscii && (
+          <div className="absolute inset-0 z-40">
+            <AsciiCube />
+          </div>
+        )}
       </div>
     </main>
   );

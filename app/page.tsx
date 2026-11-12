@@ -14,11 +14,13 @@ import {
   NIGHT_GREETING_HOLD_MS,
   type NightSky,
 } from "@/lib/scene/night-sky";
+import { BLACK_HOLE_LOOKS, BlackHoleEffect } from "@/lib/scene/black-hole";
 import { WinterTransition } from "@/lib/scene/winter";
 import { wheelToFactor, zoomAboutAnchor } from "@/lib/scene/zoom";
 
 // A procedural Chinese pine: dark fluted bark, wind-swept limbs, and sparse
-// needle pads in a quiet mountain atmosphere. All textures are made locally.
+// needle pads in a quiet mountain atmosphere. The black-hole disk is
+// NASA-inspired and procedurally rendered.
 
 const FOLIAGE_COLORS = ["#203a30", "#2c4938", "#3b543e", "#4c6047", "#5b6b50", "#29443a"];
 
@@ -603,6 +605,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dogCoordsRef = useRef<HTMLParagraphElement | null>(null);
   const constellationLabelRef = useRef<HTMLDivElement | null>(null);
+  const vignetteRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
   const desiredRef = useRef({ azimuth: 0.08, polar: 1.36, distance: 35, target: new THREE.Vector3(-1.2, 8.1, 0) });
 
@@ -643,7 +646,14 @@ export default function Home() {
       target: desiredRef.current.target.clone(),
     };
 
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const debugParams = new URLSearchParams(window.location.search);
+    const debugMonkFlight = debugParams.get("debug") === "monk-flight";
+    const debugSwallow = debugParams.get("debug") === "swallow";
+    const debugScene = debugMonkFlight || debugSwallow;
+    const blackHoleLook =
+      BLACK_HOLE_LOOKS[Math.min(BLACK_HOLE_LOOKS.length - 1, Math.max(0, (Number(debugParams.get("look")) || 2) - 1))];
+    const debugStartMs = debugSwallow ? Math.max(0, Number(debugParams.get("t")) || 0) : 0;
+    const reduceMotion = !debugScene && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const random = makeRandom(20261104);
     const textures: THREE.Texture[] = [];
 
@@ -1173,11 +1183,13 @@ export default function Home() {
     const abortVisitor = new AbortController();
     let earnedAutumn = 0;
     let earnedWinter = 0;
-    void visitor.load(abortVisitor.signal).then((status) => {
-      if (!status) return;
-      earnedAutumn = Math.max(earnedAutumn, status.unlocks);
-      earnedWinter = Math.max(earnedWinter, status.winterUnlocks);
-    });
+    if (!debugScene) {
+      void visitor.load(abortVisitor.signal).then((status) => {
+        if (!status) return;
+        earnedAutumn = Math.max(earnedAutumn, status.unlocks);
+        earnedWinter = Math.max(earnedWinter, status.winterUnlocks);
+      });
+    }
 
     // WebGL speech bubble. Before winter: Galactic glyphs, a new 2–12 letter string every 2–6 seconds.
     // In winter: the garden sentence, one new word at a time.
@@ -1214,6 +1226,7 @@ export default function Home() {
     const monkLightOffset = new THREE.Vector3().subVectors(monkLight.position, monk.position);
     const monkBodyWorld = new THREE.Vector3();
     const moonCenterWorld = new THREE.Vector3();
+    const contactWorld = new THREE.Vector3();
     const floatTargetWorld = new THREE.Vector3();
     const toMoonWorld = new THREE.Vector3();
     const tunnelAxis = new THREE.Vector3(0, 1, 0);
@@ -1221,8 +1234,8 @@ export default function Home() {
     const tunnelMid = new THREE.Vector3();
     let floatTargetReady = false;
     let monkArrived = false;
-    // Twice the old 0.4: about one body-length every three seconds.
-    const MONK_FLOAT_SPEED = 0.8;
+    // Keep normal flight at 2.4 units/s; the debug URL skips the long setup.
+    const MONK_FLOAT_SPEED = debugMonkFlight ? 16 : 2.4;
     // CylinderGeometry points along local +Y. Radius is 1.5× the monk's bounding sphere.
     const tunnelRadius = monkRadius * 1.5;
     const lightTunnel = new THREE.Mesh(
@@ -1321,7 +1334,7 @@ export default function Home() {
         if (speechMode === "intro") wordCount += 1;
         else spoken = nextMonkSnippet(spoken);
         showSpeech();
-        scheduleChatter();
+        if (!debugScene) scheduleChatter();
       }, delay);
     };
     scheduleChatter();
@@ -1353,7 +1366,39 @@ export default function Home() {
           return;
         }
         nightSky = sky;
-        if (nightStartedAt !== null) sky.start(nightStartedAt);
+        if (debugScene) {
+          placeCamera(camera, viewRef.current);
+          nightStartedAt = performance.now();
+          sky.startForDebug(nightStartedAt, camera);
+          if (sky.moonCenter(moonCenterWorld)) {
+            monkBodyWorld.copy(monk.position).add(monkBodyOffset);
+            floatTargetWorld.subVectors(monkBodyWorld, moonCenterWorld);
+            if (floatTargetWorld.lengthSq() < 1e-8) floatTargetWorld.set(0, 0, 1);
+            floatTargetWorld.setLength(sky.moonRadius + monkRadius).add(moonCenterWorld);
+            if (debugSwallow) {
+              monk.position.copy(floatTargetWorld).sub(monkBodyOffset);
+              monkArrived = true;
+              // The risen moon sits behind the start camera, so turn the debug view to the monk on its face.
+              const aim = floatTargetWorld.clone();
+              const offset = camera.position.clone().sub(aim);
+              const aimDistance = Math.max(0.01, offset.length());
+              const azimuth = Math.atan2(offset.x, offset.z);
+              const polar = Math.acos(THREE.MathUtils.clamp(offset.y / aimDistance, -1, 1));
+              for (const pose of [viewRef.current, desiredRef.current]) {
+                pose.azimuth = azimuth;
+                pose.polar = polar;
+                pose.distance = aimDistance / fitScale;
+                pose.target.copy(aim);
+              }
+            } else {
+              monkBodyWorld.lerp(floatTargetWorld, 0.68);
+              monk.position.copy(monkBodyWorld).sub(monkBodyOffset);
+              floatTargetReady = true;
+            }
+          }
+        } else if (nightStartedAt !== null) {
+          sky.start(nightStartedAt);
+        }
       })
       .catch((error: unknown) => {
         console.error("Could not load night-sky star data", error);
@@ -1390,6 +1435,7 @@ export default function Home() {
     campfire.group.scale.setScalar(1.5);
     campfire.group.visible = false;
     scene.add(campfire.group);
+    const blackHoleEffect = new BlackHoleEffect();
 
     // A few quiet stones anchor the foreground without making a forest floor busy.
     const stoneGeometry = new THREE.IcosahedronGeometry(1, 1);
@@ -1457,10 +1503,10 @@ export default function Home() {
     textures.push(winter.flakeTexture);
 
     // #autumn and #winter jump straight to a stage so each look can be checked quickly.
-    if (window.location.hash.includes("winter")) {
+    if (debugScene || window.location.hash.includes("winter")) {
       stages.jumpTo("winter");
       winter.start(0, true);
-      beginIntro();
+      if (!debugScene) beginIntro();
       campfire.group.visible = true;
     } else if (window.location.hash.includes("autumn")) {
       stages.jumpTo("autumn");
@@ -1889,7 +1935,9 @@ export default function Home() {
       const toCamera = new THREE.Vector3().subVectors(camera.position, monk.position).normalize();
       const facing = monkForward.dot(toCamera);
       const bubbleVisible =
-        speechMode === "intro" || galacticReady ? THREE.MathUtils.smoothstep(facing, -0.2, 0.5) : 0;
+        !debugScene && (speechMode === "intro" || galacticReady)
+          ? THREE.MathUtils.smoothstep(facing, -0.2, 0.5)
+          : 0;
       bubble.material.opacity = 0.94 * bubbleVisible;
       bubble.visible = bubbleVisible > 0.02;
 
@@ -1968,7 +2016,9 @@ export default function Home() {
           progress.next === null
             ? "winter"
             : `${progress.stage === "autumn" ? "autumn   " : ""}laps ${arrow} ${shownLaps.toFixed(1)}/${LAPS_TO_UNLOCK} → ${progress.next}`;
-        dogCoordsRef.current.textContent = `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}${earned}`;
+        dogCoordsRef.current.textContent = debugSwallow
+          ? `swallow   ${blackHoleLook.name}`
+          : `from tree   x ${formatAxis(dog.position.x)}   z ${formatAxis(dog.position.z)}   ${lapText}${earned}`;
       }
 
       const gait = dogMoving && !reduceMotion ? 1 : 0;
@@ -2010,9 +2060,17 @@ export default function Home() {
       nightSky?.update(now, camera);
       // Fire at its cap: drift the body center straight at the moon center.
       // The target is fixed on the first frame, so the path stays one line.
-      if (!monkArrived && campfire.atMaximum && nightSky?.moonFullyUp && nightSky.moonCenter(moonCenterWorld)) {
+      if (
+        !monkArrived &&
+        (debugMonkFlight || campfire.atMaximum) &&
+        nightSky?.moonFullyUp &&
+        nightSky.moonCenter(moonCenterWorld)
+      ) {
         if (!floatTargetReady) {
-          floatTargetWorld.copy(moonCenterWorld);
+          monkBodyWorld.copy(monk.position).add(monkBodyOffset);
+          floatTargetWorld.subVectors(monkBodyWorld, moonCenterWorld);
+          if (floatTargetWorld.lengthSq() < 1e-8) floatTargetWorld.set(0, 0, 1);
+          floatTargetWorld.setLength(nightSky.moonRadius + monkRadius).add(moonCenterWorld);
           floatTargetReady = true;
         }
         monkBodyWorld.copy(monk.position).add(monkBodyOffset);
@@ -2048,10 +2106,24 @@ export default function Home() {
           lightTunnel.visible = true;
         }
       }
+      if (monkArrived && !blackHoleEffect.started && nightSky?.moonCenter(moonCenterWorld)) {
+        monkBodyWorld.copy(monk.position).add(monkBodyOffset);
+        contactWorld.subVectors(monkBodyWorld, moonCenterWorld);
+        if (contactWorld.lengthSq() < 1e-8) contactWorld.set(0, 0, 1);
+        contactWorld.setLength(nightSky.moonRadius).add(moonCenterWorld);
+        blackHoleEffect.start(now - debugStartMs, contactWorld, blackHoleLook, reduceMotion);
+      }
+      if (blackHoleEffect.started && !debugSwallow) {
+        const hudOpacity = 1 - THREE.MathUtils.smoothstep(blackHoleEffect.progress, 0.12, 0.36);
+        if (dogCoordsRef.current) dogCoordsRef.current.style.opacity = String(hudOpacity);
+        if (constellationLabelRef.current) constellationLabelRef.current.style.opacity = String(hudOpacity);
+        if (vignetteRef.current) vignetteRef.current.style.opacity = String(hudOpacity);
+      }
       bubble.position.copy(monk.position).add(bubbleOffset);
       if (bubble.visible) bubble.position.y += Math.sin(now * 0.0011) * 0.06;
 
-      renderer.render(scene, camera);
+      if (blackHoleEffect.started) nightSky?.collapseMoon(contactWorld, blackHoleEffect.moonCollapse);
+      blackHoleEffect.render(renderer, scene, camera, now);
     };
     animate();
 
@@ -2062,6 +2134,7 @@ export default function Home() {
       window.clearTimeout(chatterTimer);
       if (nightTimer !== null) window.clearTimeout(nightTimer);
       nightSky?.dispose();
+      blackHoleEffect.dispose();
       bubbleTexture.texture.dispose();
       observer.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
@@ -2109,6 +2182,7 @@ export default function Home() {
           className="pointer-events-none absolute z-30 hidden rounded-full border border-blue-100/40 bg-slate-950/85 px-3 py-1.5 font-serif text-sm tracking-wide text-blue-50 shadow-lg shadow-blue-900/30 backdrop-blur-sm"
         />
         <div
+          ref={vignetteRef}
           className="pointer-events-none absolute inset-0"
           style={{
             background:

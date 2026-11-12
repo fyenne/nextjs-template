@@ -20,3 +20,13 @@ Visualization Studio, CGI Moon Kit, ID 4720:
 
 Credit: NASA's Scientific Visualization Studio. Visualizer: Ernie Wright (STC).
 The map is painted on a smooth sphere. It is not a scientific product.
+
+Black hole visualization
+------------------------
+The black-hole effect is rendered procedurally. Its accretion-disk and lensing
+design references NASA's "Black Hole Accretion Disk Visualization" (Scientific
+Visualization Studio, ID 13326):
+
+  https://svs.gsfc.nasa.gov/13326
+
+Credit for the reference: NASA's Goddard Space Flight Center/Jeremy Schnittman.

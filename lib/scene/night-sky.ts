@@ -2,6 +2,9 @@ import * as THREE from "three";
 
 export const NIGHT_GREETING_HOLD_MS = 5000;
 export const NIGHT_TRANSITION_MS = 6500;
+// The sky draws in its own pass, so the black hole can warp the landscape without moving the stars.
+export const WORLD_LAYER = 0;
+export const SKY_LAYER = 1;
 
 const SKY_LATITUDE = 40;
 // A late-evening winter sky, with the celestial sphere rotated to frame Gemini above the tree.
@@ -358,6 +361,9 @@ export class NightSky {
   readonly pointsTexture: THREE.Texture;
 
   private readonly risenMoon: THREE.Group;
+  private moonBody: THREE.Mesh | null = null;
+  private moonRestPositions: Float32Array | null = null;
+  private readonly moonTargetLocal = new THREE.Vector3();
   private readonly risenLight: THREE.DirectionalLight;
   private readonly moonMap: THREE.Texture;
   private geminiHoverSince: number | null = null;
@@ -481,6 +487,7 @@ export class NightSky {
     this.risenMoon = new THREE.Group();
     this.risenMoon.name = "Risen moon";
     this.risenMoon.add(moonBody);
+    this.moonBody = moonBody;
     this.risenMoon.visible = false;
     this.root.add(this.risenMoon);
 
@@ -499,6 +506,17 @@ export class NightSky {
     shadowCamera.updateProjectionMatrix();
     this.risenLight.target.position.set(0, 0.4, 0);
     this.root.add(this.risenLight, this.risenLight.target);
+
+    this.root.traverse((object) => {
+      object.layers.set(SKY_LAYER);
+    });
+    this.risenMoon.traverse((object) => {
+      object.layers.set(WORLD_LAYER);
+    });
+    this.moon.layers.set(WORLD_LAYER);
+    this.risenLight.layers.set(WORLD_LAYER);
+    this.risenLight.target.layers.set(WORLD_LAYER);
+    this.raycaster.layers.enable(SKY_LAYER);
   }
 
   get nightLevel() {
@@ -510,11 +528,46 @@ export class NightSky {
     return this.moonIsUp;
   }
 
+  /** Visual radius of the risen moon in world units. */
+  get moonRadius() {
+    return MOON_RADIUS;
+  }
+
   /** World position of the risen moon's center. The sphere is centered on the group. */
   moonCenter(target: THREE.Vector3) {
     if (!this.moonIsUp) return false;
     this.risenMoon.getWorldPosition(target);
     return true;
+  }
+
+  /**
+   * Pulls the moon's surface toward a point on it, so the disc caves in around that point
+   * and its outline stops being round. Points near the target move most; the far limb barely moves.
+   */
+  collapseMoon(target: THREE.Vector3, amount: number) {
+    const mesh = this.moonBody;
+    if (!mesh || amount <= 0) return;
+    const position = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+    if (!this.moonRestPositions) {
+      this.moonRestPositions = Float32Array.from(position.array as ArrayLike<number>);
+    }
+    mesh.updateWorldMatrix(true, false);
+    this.moonTargetLocal.copy(target);
+    mesh.worldToLocal(this.moonTargetLocal);
+    const rest = this.moonRestPositions;
+    const { x: tx, y: ty, z: tz } = this.moonTargetLocal;
+    const reach2 = 2 * (MOON_RADIUS * 0.4) ** 2;
+    for (let i = 0; i < position.count; i++) {
+      const x = rest[i * 3];
+      const y = rest[i * 3 + 1];
+      const z = rest[i * 3 + 2];
+      const dx = tx - x;
+      const dy = ty - y;
+      const dz = tz - z;
+      const w = amount * Math.exp(-(dx * dx + dy * dy + dz * dz) / reach2);
+      position.setXYZ(i, x + dx * w, y + dy * w, z + dz * w);
+    }
+    position.needsUpdate = true;
   }
 
   private addMilkyWayDust() {
@@ -705,6 +758,15 @@ export class NightSky {
       })),
     };
     this.startedAt = now;
+  }
+
+  /** Skip directly to a completed night and risen moon for the flight debug URL. */
+  startForDebug(now: number, camera: THREE.Camera) {
+    this.start(now - NIGHT_TRANSITION_MS);
+    camera.updateMatrixWorld(true);
+    this.geminiHoverSince = now - MOON_RISE_MS - GEMINI_MOON_HOVER_MS;
+    this.stepRisenMoon(now - MOON_RISE_MS, camera);
+    this.stepRisenMoon(now, camera);
   }
 
   update(now: number, camera?: THREE.Camera) {
